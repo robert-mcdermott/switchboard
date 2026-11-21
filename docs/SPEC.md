@@ -179,6 +179,8 @@ Hard rule: **nothing that runs as root links third-party code.**
 | Source | Privilege | Role | Cadence | Stability |
 |---|---|---|---|---|
 | **NStat** (NetworkStatistics) | none for the login user's flows; root for nearly all | Backbone: flow open/close events, 5-tuple, PID, counters, RTT, retransmits, interface, start time | Event-driven; counters refreshed at 1 Hz (up to 4 Hz configurable), since asking is the cost | Private framework, loaded with `dlopen` |
+
+As found in M8: unprivileged, NetworkStatistics reports another process's new socket only when it closes; as root it reports most, not all, as they open. Every subscription does report each socket open when it subscribes, with counters that stay current. So the source subscribes afresh every 5 s (10 s as root) and publishes sockets under IDs derived from the socket (protocol, PID, local port, creation time), so connections continue across subscriptions; during a 1.5 s handover only the newest subscription's report of a socket is used and counters never go backwards. Where two sources report one socket, the engine uses the one whose counters rank higher: the kernel socket list ranks below NetworkStatistics.
 | **KernelSocketList** (`pcblist_n` sysctl) | root | Complete inventory in the collector: cross-check for which sockets exist, never for received bytes, which it over-reports | 1 Hz | Private struct layout, parser verified |
 | **LibProc** | none for own user; root for all | Authoritative fd ownership, process path, parent, UID, start time | On first sight, then cached | Public API |
 | **PktapCapture** (libpcap) | root | DNS answers, TLS SNI, SYN/FIN timestamps, PID for short flows | Continuous | Private header layout |

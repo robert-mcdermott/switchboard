@@ -31,11 +31,7 @@ public enum SourceSpec {
         for part in spec.split(separator: "+") {
             switch part {
             case "nstat":
-                let statistics = NStatSource(counterInterval: counterInterval)
-                // Alone, with nothing to compare against, renew now and then in case the
-                // subscription has stopped hearing about new sockets.
-                statistics.renewEvery = 900
-                sources.append(statistics)
+                sources.append(NStatSource(counterInterval: counterInterval))
             case "nettop":
                 sources.append(NettopSource())
             case let text where text == "collector" || text.hasPrefix("collector:"):

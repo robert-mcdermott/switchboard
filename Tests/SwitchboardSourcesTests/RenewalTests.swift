@@ -112,6 +112,8 @@ private final class LoopbackPair {
 @Suite(.serialized) struct RenewalTests {
     @Test func renewingKeepsSocketsAndTheirIDs() throws {
         let source = NStatSource(counterInterval: 0.25)
+        // Renewed by hand below, not by the schedule.
+        source.renewEvery = nil
         do { try source.start() } catch {
             // NetworkStatistics is optional at run time; without it there is nothing to test.
             return
@@ -159,5 +161,58 @@ private final class LoopbackPair {
             Thread.sleep(forTimeInterval: 0.25)
         }
         #expect(closed == 1)
+    }
+
+    /// What went wrong for the owner: a download by another process, begun after the
+    /// subscription, was reported only when it ended. Renewal now brings it in live.
+    @Test func anotherProcesssNewConnectionIsReportedWhileOpen() throws {
+        let source = NStatSource(counterInterval: 0.5)
+        do { try source.start() } catch { return }
+        defer { source.stop() }
+
+        // A listener here; the connection to it comes from nc, another process.
+        let listening = socket(AF_INET, SOCK_STREAM, 0)
+        defer { close(listening) }
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+        _ = withUnsafePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(listening, $0, length) } }
+        _ = withUnsafeMutablePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(listening, $0, &length) } }
+        Darwin.listen(listening, 1)
+        let port = UInt16(bigEndian: address.sin_port)
+
+        var time: Double = 0
+        func tick() -> [SourceEvent] {
+            time += 0.25
+            Thread.sleep(forTimeInterval: 0.25)
+            return source.poll(now: time)
+        }
+        // Long enough that a subscription without renewal would no longer hear of it.
+        while time < 8 { _ = tick() }
+
+        let nc = Process()
+        nc.executableURL = URL(fileURLWithPath: "/usr/bin/nc")
+        nc.arguments = ["127.0.0.1", "\(port)"]
+        let input = Pipe()
+        nc.standardInput = input
+        nc.standardOutput = FileHandle.nullDevice
+        try nc.run()
+        let server = accept(listening, nil, nil)
+        defer { close(server) }
+        var liveReport = false
+        let opened = time
+        while time - opened < 9, !liveReport {
+            input.fileHandleForWriting.write(Data(repeating: 65, count: 10_000))
+            for case .seen(let observation) in tick()
+            where observation.pid == nc.processIdentifier && observation.tcpState == .established {
+                liveReport = true
+            }
+        }
+        try? input.fileHandleForWriting.close()
+        nc.terminate()
+        nc.waitUntilExit()
+        #expect(liveReport, "nc's connection was not reported while it was open")
     }
 }

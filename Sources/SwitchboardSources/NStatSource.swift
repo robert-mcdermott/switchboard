@@ -49,6 +49,11 @@ public final class NStatSource: FlowSource, @unchecked Sendable {
         /// reported gone only when no subscription still holds it.
         private var liveIDs: [Int: Set<UInt64>] = [:]
         private var retired = Set<Int>()
+        /// The newest subscription that has described each socket. Only it is listened to
+        /// for that socket: an older one may hold counters that have stopped moving.
+        private var newest: [UInt64: Int] = [:]
+        /// The highest counters published for each socket, so they never go backwards.
+        private var highest: [UInt64: (rx: UInt64, tx: UInt64, rxPackets: UInt64, txPackets: UInt64)] = [:]
         private(set) var total = 0
         private(set) var rejected = 0
         private(set) var rejectedSample: String?
@@ -68,9 +73,34 @@ public final class NStatSource: FlowSource, @unchecked Sendable {
 
         func push(_ event: SourceEvent, startTicks ticks: UInt64 = 0) {
             lock.lock()
+            defer { lock.unlock() }
+            var event = event
+            switch event {
+            case .seen(var observation):
+                // Two subscriptions can disagree for a moment while one replaces the other;
+                // a socket's counters only ever grow, so the larger figure is the true one.
+                let id = observation.sourceID
+                if let top = highest[id] {
+                    observation.rxBytes = max(observation.rxBytes, top.rx)
+                    observation.txBytes = max(observation.txBytes, top.tx)
+                    observation.rxPackets = max(observation.rxPackets, top.rxPackets)
+                    observation.txPackets = max(observation.txPackets, top.txPackets)
+                }
+                highest[id] = (observation.rxBytes, observation.txBytes, observation.rxPackets, observation.txPackets)
+                event = .seen(observation)
+            case .removed(let id):
+                highest[id] = nil
+                newest[id] = nil
+            }
             events.append(event)
             startTicks.append(ticks)
-            lock.unlock()
+        }
+
+        /// Whether `generation` is the newest subscription to have described socket `id`.
+        func isNewest(_ id: UInt64, generation: Int) -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return (newest[id] ?? generation) <= generation
         }
 
         /// A subscription has described a socket for the first time.
@@ -80,6 +110,7 @@ public final class NStatSource: FlowSource, @unchecked Sendable {
             guard !retired.contains(generation) else { return }
             if !liveIDs.values.contains(where: { $0.contains(id) }) { total += 1 }
             liveIDs[generation, default: []].insert(id)
+            newest[id] = max(newest[id] ?? generation, generation)
         }
 
         /// A subscription says a socket is gone. True if no subscription still holds it,
@@ -106,6 +137,8 @@ public final class NStatSource: FlowSource, @unchecked Sendable {
             retired.insert(generation)
             let held = liveIDs.removeValue(forKey: generation) ?? []
             let elsewhere = liveIDs.values.reduce(into: Set<UInt64>()) { $0.formUnion($1) }
+            // Keep the set of retired generations from growing for ever: renewals are frequent.
+            if retired.count > 64, let oldest = retired.min() { retired.remove(oldest) }
             return held.subtracting(elsewhere).sorted()
         }
 
@@ -157,9 +190,22 @@ public final class NStatSource: FlowSource, @unchecked Sendable {
     private var functions: Functions?
     /// How many times the subscription has been renewed.
     public private(set) var renewals = 0
-    /// Renews the subscription this often, in seconds, where nothing else can tell when it
-    /// has gone stale; `nil` for never. The collector renews on evidence instead.
-    public var renewEvery: Double?
+    /// Renews the subscription this often, in seconds; `nil` for never.
+    ///
+    /// Run as an ordinary user, a subscription is told about another process's new socket
+    /// only when it closes, with all its bytes at once; as root it is told about most as
+    /// they open, but not all (docs/spikes/M8-findings.md). What every subscription does
+    /// get is each socket open at the moment it subscribes, with counters that then stay
+    /// current. So subscribing afresh every few seconds brings each new connection in within
+    /// that time, live from then on. Sockets keep their IDs across a renewal. `nettop`,
+    /// which holds a private entitlement, is not limited this way.
+    public var renewEvery: Double? = NStatSource.userRenewal
+
+    /// How often to subscribe afresh as an ordinary user, who is told of other processes'
+    /// new sockets only when they close.
+    public static let userRenewal: Double = 5
+    /// How often as root, which is told of most new sockets as they open.
+    public static let rootRenewal: Double = 10
     /// A line about coverage from whoever can measure it, shown with this source's health.
     public var coverageNote: String? {
         get { lock.withLock { note } }
@@ -167,8 +213,9 @@ public final class NStatSource: FlowSource, @unchecked Sendable {
     }
     private var note: String?
 
-    /// How long an outgoing subscription is kept beside its replacement.
-    static let handover: Double = 3
+    /// How long an outgoing subscription is kept beside its replacement: long enough for
+    /// the new one to describe every socket.
+    static let handover: Double = 1.5
 
     private struct Functions {
         var create: CreateFn
@@ -211,6 +258,7 @@ public final class NStatSource: FlowSource, @unchecked Sendable {
 
     public init(counterInterval: Double = 1.0) {
         interval = counterInterval
+        if getuid() == 0 { renewEvery = Self.rootRenewal }
     }
 
     public func start() throws {
@@ -281,6 +329,8 @@ public final class NStatSource: FlowSource, @unchecked Sendable {
                         : pointer ^ (UInt64(generation) << 56)
                     inbox.noteLive(box.id!, generation: generation)
                 }
+                // A newer subscription has this socket: its figures are the ones to use.
+                guard inbox.isNewest(box.id!, generation: generation) else { return }
                 observation.sourceID = box.id!
                 inbox.push(.seen(observation), startTicks: start)
             }
@@ -320,9 +370,8 @@ public final class NStatSource: FlowSource, @unchecked Sendable {
         return hash == 0 ? 1 : hash
     }
 
-    /// Asks for a fresh subscription. NetworkStatistics can stop telling a long-lived
-    /// subscriber about new sockets; a new subscription sees them again
-    /// (docs/spikes/M8-findings.md). The switch is seamless: sockets keep their IDs.
+    /// Asks for a fresh subscription now, rather than at the next scheduled renewal. The
+    /// switch is seamless: sockets keep their IDs.
     public func renew() {
         lock.withLock { renewRequested = true }
     }
@@ -381,7 +430,7 @@ public final class NStatSource: FlowSource, @unchecked Sendable {
             running: manager != nil,
             detail: "\(counts.live) sockets tracked, \(counts.total) seen" + (getuid() == 0 ? "" : " (login user only)")
                 + (counts.rejected > 0 ? ", \(counts.rejected) updates unreadable" : "")
-                + (renewals > 0 ? ", renewed \(renewals) time\(renewals == 1 ? "" : "s")" : "")
+                + (renewEvery.map { ", renewed every \(Int($0)) s" } ?? (renewals > 0 ? ", renewed \(renewals) times" : ""))
                 + (note.map { "; \($0)" } ?? ""))
     }
 

@@ -169,7 +169,8 @@ public final class CollectorServer: @unchecked Sendable {
     }
 
     /// Every 30 seconds, compares the connections the kernel lists with those
-    /// NetworkStatistics has reported, and renews its subscription when it has gone stale.
+    /// NetworkStatistics has reported, for the Health tab. NetworkStatistics renews its own
+    /// subscription on a schedule; this shows whether that is keeping up.
     private func checkCoverage(now: EngineTime) {
         guard now - (lastCoverageCheck ?? -.infinity) >= SocketCoverage.interval else { return }
         lastCoverageCheck = now
@@ -181,15 +182,11 @@ public final class CollectorServer: @unchecked Sendable {
         lock.unlock()
         let coverage = SocketCoverage(listed: listed, reported: reported, unreportedBefore: unreportedBefore)
         unreportedBefore = coverage.unreported
-        source.coverageNote = coverage.summary
-        if coverage.isStale, now - (renewedAt ?? -.infinity) >= SocketCoverage.cooldown {
-            renewedAt = now
-            FileHandle.standardError.write(Data("switchboardd: renewing NetworkStatistics: \(coverage.summary)\n".utf8))
-            source.renew()
+        source.coverageNote = coverage.summary + (coverage.isStale ? " (fewer than usual)" : "")
+        if coverage.isStale {
+            FileHandle.standardError.write(Data("switchboardd: NetworkStatistics coverage low: \(coverage.summary)\n".utf8))
         }
     }
-
-    private var renewedAt: EngineTime?
 
     private func broadcast(_ frames: [[UInt8]], includeHealth: Bool) {
         lock.lock()
@@ -428,8 +425,8 @@ public final class CollectorServer: @unchecked Sendable {
     }
 }
 
-/// How much of what the kernel lists NetworkStatistics is reporting, and whether that has
-/// fallen far enough to renew its subscription.
+/// How much of what the kernel lists NetworkStatistics is reporting, and whether that is
+/// lower than it should be.
 ///
 /// Only established TCP connections count, and only those unreported at two checks in a
 /// row, so a connection that opened a moment ago and has not yet been described is not
@@ -443,10 +440,8 @@ public struct SocketCoverage: Sendable {
     }
 
     public static let interval: Double = 30
-    /// The least time between renewals.
-    public static let cooldown: Double = 300
-    /// Renew when at least this share of listed connections, and at least `minimum` of
-    /// them, have gone unreported for two checks.
+    /// Lower than usual when at least this share of listed connections, and at least
+    /// `minimum` of them, have gone unreported for two checks.
     public static let threshold = 0.15
     public static let minimum = 5
 

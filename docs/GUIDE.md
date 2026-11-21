@@ -45,6 +45,7 @@ Switchboard runs in one of two modes, shown at the top left of the window.
 - Connections made by other accounts and by system daemons running as root (for example `mDNSResponder`, `syspolicyd`, software-update and security agents).
 - Hostnames. Without packet capture there are no DNS answers or TLS handshakes to read names from, so destinations show as addresses unless you turn on active lookups (below).
 - A small share of your own sockets, about 5 to 8%, which the system's statistics interface does not report to an unprivileged program.
+- New connections for their first few seconds. The system reports other programs' new connections to an ordinary program only when they close, so Switchboard asks afresh every 5 seconds: a new connection appears within that time and is live from then on, and one that lasts less than that appears only once it has ended.
 
 **Full** adds a small collector, `switchboardd`, that runs as root. With it Switchboard sees every account's connections, reads hostnames from DNS answers and TLS server names, and learns what protocol a connection really speaks. The app notices the collector and switches to Full on its own.
 
@@ -226,7 +227,7 @@ Choose *Save Current as Workspace…* to add your own. *Export Settings…* and 
 
 **macOS asks whether to reopen windows.** This happens after Switchboard was stopped while starting up. Choose either; it is harmless.
 
-**Received traffic looks too low in Full mode.** Builds before 21 November 2026 could miss half of all connections' received bytes after the collector had run for some hours. Reinstall the collector with `sudo scripts/install.sh`. The Health tab's NetworkStatistics line now says how many of the connections the kernel lists it is reporting, and how often it has renewed itself to keep that figure up.
+**A download shows little received traffic, then a spike when it ends.** Builds before 21 November 2026 did this: the system tells an ordinary program about other programs' new connections only when they close. Switchboard now asks afresh every few seconds, so a new connection appears within about 5 seconds (10 with the collector) and is live from then on. In Full mode, reinstall the collector with `sudo scripts/install.sh` to get the fix there too. The Health tab's NetworkStatistics line shows how often it renews, and in Full mode how many of the connections the kernel lists it is reporting.
 
 **It uses more CPU than I would like.** Switch to the Operator profile (**P**), which draws half as often. Hiding the panels (**B**) saves a little more.
 
