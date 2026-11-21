@@ -68,7 +68,26 @@ The step that pushes overlapping nodes apart bucketed them into a dictionary of 
 
 No memory grew without bound over that time.
 
-**After** (current build, Cinema, panels open, a full hour of timeline): a four-hour run was in progress when this was written; its results are added below when it finishes.
+**After tonight's performance work, with the leak below** (76 minutes, Cinema, panels open, a full hour of timeline):
+
+| | Median | Range |
+|---|---|---|
+| App memory (resident) | 296 MB | 246–389 MB, rising as the hour of history filled |
+| App footprint at 66 minutes | 574 MB | of which about 290 MB is GPU memory for a 2548 × 2880 pixel window |
+| App CPU | 24% | 11–26% |
+| Frames per second | 118 | 109–120 |
+| Slowest 1% of frames | 14.6 ms | 9–16 ms |
+| Collector | 10.7 MB, 1.1% CPU | 10.3–11.2 MB |
+
+The worst frames, 162 ms at minute 11 and 2.7 s at minute 68, are my own doing: `sample` and `heap` pause the process they inspect, and both were run then. Other copies of the app were also running for measurements during part of this soak.
+
+### A leak, found by the soak
+
+`heap` on the soaking app showed **79,076 live `NSError` objects**, growing at about 20 a second. The feed thread runs for the life of the app and never drained its autoreleased objects. Four times a second it asked again about the signatures of the processes it could not read, and each failed file check left an error behind. The loop now has its own autorelease pool, and each process is asked about once. A fresh instance held 2 errors, unchanged over two minutes. The collector's loop follows the same pattern and now has a pool too; its memory was flat for over two hours, so it did not show the problem.
+
+The same heap listing shows where the hour of history goes: 1,083 lists of connections, 83 MB in all, and 928 lists of processes (17.5 MB) that were meant to be shared between snapshots. An unchanged "still unknown" signature verdict counted as a change four times a second; it no longer does, but processes coming and going still make most lists distinct.
+
+**Fixed build** (2.5 hours, Cinema, panels open, a full hour of timeline, nothing else running): started at 04:30; results are added here when it finishes.
 
 ### The log grows faster than expected on this Mac
 
