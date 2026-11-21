@@ -11,7 +11,7 @@ struct InspectorView: View {
             HStack {
                 SectionTitle("Inspector")
                 Spacer()
-                if model.selection != nil {
+                if !model.selection.isEmpty {
                     Button("Clear") { model.select(nil) }
                         .buttonStyle(.plain)
                         .font(.mono(10))
@@ -43,7 +43,8 @@ struct InspectorView: View {
                         .font(.mono(11))
 
                         SectionTitle("Connections (\(model.inspectorRows.count))")
-                        VStack(alignment: .leading, spacing: 6) {
+                        // Lazy, so only the rows on screen are laid out each second.
+                        LazyVStack(alignment: .leading, spacing: 6) {
                             ForEach(model.inspectorRows.prefix(60)) { row in
                                 ConnectionSummary(row: row)
                             }
@@ -57,7 +58,7 @@ struct InspectorView: View {
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
-            } else if model.selection != nil {
+            } else if !model.selection.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Not in view").font(.mono(12)).foregroundStyle(Color.readout)
                     Text("The selected item has no connections that match the current filter, or it has gone quiet. It will reappear here if that changes.")
@@ -97,26 +98,5 @@ struct ConnectionSummary: View {
                 .lineLimit(1)
         }
         .font(.mono(10))
-    }
-}
-
-extension AppModel {
-    func filterToSelection() {
-        switch selection {
-        case .node(.process(let pid)), .edge(.host, .process(let pid)): filterText = "pid=\(pid)"
-        case .node(.endpoint(let address)): filterText = "remote=\(address)"
-        case .edge(.process(let pid), .endpoint(let address)): filterText = "pid=\(pid) remote=\(address)"
-        default: return
-        }
-        applyFilter()
-    }
-
-    func toggleFocusOnSelection() {
-        if session.controller.focus != nil {
-            clearFocus()
-        } else if let selection {
-            session.controller.focus = selection
-            focused = true
-        }
     }
 }

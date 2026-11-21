@@ -304,3 +304,48 @@ private func listener(_ id: UInt64, pid: Int32 = 100, address: String = "0.0.0.0
         #expect(Endpoint(address: IPAddress("::1")!, port: 443).description == "[::1]:443")
     }
 }
+
+@Suite struct TimeWindowTests {
+    private func snapshot(_ time: Double, flows: Int = 1) -> EngineSnapshot {
+        let engine = FlowEngine()
+        let events = (0..<flows).map { tcp(UInt64($0 + 1), localPort: UInt16(50_000 + $0)) }
+        engine.ingest(events, from: "test", at: time)
+        return engine.snapshot()
+    }
+
+    @Test func findsTheMomentAtOrBeforeATime() {
+        var window = TimeWindow()
+        for second in 0..<10 { window.append(snapshot(Double(second))) }
+        #expect(window.range == 0...9)
+        #expect(window.snapshot(at: 4)?.time == 4)
+        #expect(window.snapshot(at: 4.7)?.time == 4)
+        #expect(window.snapshot(at: 100)?.time == 9)
+        // Before the start, the oldest moment is the best there is.
+        #expect(window.snapshot(at: -5)?.time == 0)
+        #expect(TimeWindow().snapshot(at: 1) == nil)
+    }
+
+    @Test func forgetsWhatIsTooOld() {
+        var window = TimeWindow(maximumAge: 5)
+        for second in 0..<20 { window.append(snapshot(Double(second))) }
+        #expect(window.range == 14...19)
+    }
+
+    @Test func keepsLessHistoryWhenThereIsMoreToRemember() {
+        var window = TimeWindow(maximumAge: 1000, maximumRecords: 50)
+        for second in 0..<30 { window.append(snapshot(Double(second), flows: 10)) }
+        #expect(window.snapshots.count == 5)
+        #expect(window.range?.upperBound == 29)
+        // Even one oversized snapshot is kept: the present is never dropped.
+        var tiny = TimeWindow(maximumAge: 1000, maximumRecords: 3)
+        tiny.append(snapshot(1, flows: 10))
+        #expect(tiny.snapshots.count == 1)
+    }
+
+    @Test func startsAgainIfTimeGoesBackwards() {
+        var window = TimeWindow()
+        for second in 5..<10 { window.append(snapshot(Double(second))) }
+        window.append(snapshot(2))
+        #expect(window.range == 2...2)
+    }
+}

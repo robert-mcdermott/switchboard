@@ -304,7 +304,9 @@ public final class SimulatorSource: FlowSource, @unchecked Sendable {
         for index in base.indices {
             let count: Int
             switch base[index].behaviour {
-            case .steady: count = max(2, min(40, base[index].target / 2 + 2))
+            // A very large run gets more distinct destinations per process, to fill the
+            // graph with thousands of nodes; ordinary runs are unchanged.
+            case .steady: count = max(2, min((flows ?? 0) >= 8000 ? 90 : 40, base[index].target / 2 + 2))
             case .beacon, .scan: count = 1
             }
             base[index].peers = peers(count, random: &random)

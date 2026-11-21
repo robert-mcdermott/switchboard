@@ -17,7 +17,7 @@ public final class GraphSession: NSObject, MTKViewDelegate {
     }
 
     public enum ContextAction: Sendable {
-        case filterToThis, focusOnThis, copyDetails, revealInFinder
+        case filterToThis, focusOnThis, copyDetails, revealInFinder, toggleCluster
     }
 
     public let controller: GraphController
@@ -30,10 +30,10 @@ public final class GraphSession: NSObject, MTKViewDelegate {
     public var onHover: ((HoverInfo?, CGPoint) -> Void)?
     public var onKey: ((Key) -> Void)?
     /// A click on the graph: the target, or `nil` for empty space.
-    public var onSelect: ((PickTarget?) -> Void)?
+    public var onSelect: ((PickTarget?, _ extend: Bool) -> Void)?
     public var onContext: ((ContextAction, PickTarget) -> Void)?
     /// What is pinned in the inspector. Stays lit when the pointer moves away.
-    public var selection: PickTarget?
+    public var selection = Set<PickTarget>()
     public var onFailure: ((String) -> Void)?
     /// Set to have the next frame saved as a PNG.
     public var capture: FrameCapture?
@@ -93,7 +93,9 @@ public final class GraphSession: NSObject, MTKViewDelegate {
         else { return }
 
         controller.step()
-        let frame = controller.frame(labelBudget: profile.labelBudget, highlight: hoverTarget ?? selection)
+        var highlights = selection
+        if let hoverTarget { highlights.insert(hoverTarget) }
+        let frame = controller.frame(labelBudget: profile.labelBudget, highlights: highlights)
         nodeCount = frame.nodes.count
         edgeCount = frame.edges.count
         if firstDataFrame == nil, !frame.edges.isEmpty { firstDataFrame = Date() }
@@ -218,18 +220,18 @@ public final class GraphSession: NSObject, MTKViewDelegate {
         return controller.pick(at: world(at: point, in: view), slack: 5 * backing / camera(for: view).scale)
     }
 
-    func click(at point: CGPoint, count: Int) {
+    func click(at point: CGPoint, count: Int, extend: Bool) {
         let target = target(at: point)
         if count >= 2 {
             // Double-click isolates a neighbourhood; double-clicking it again, or empty space, releases it.
             controller.focus = (target == controller.focus) ? nil : target
         }
-        selection = target
-        onSelect?(target)
+        onSelect?(target, extend)
     }
 
     func context(_ action: ContextAction, _ target: PickTarget) {
         if action == .focusOnThis { controller.focus = target }
+        if action == .toggleCluster, case .node(let id) = target { controller.toggleExpansion(of: id) }
         onContext?(action, target)
     }
 }
@@ -275,7 +277,9 @@ final class GraphMTKView: MTKView {
     }
 
     override func mouseUp(with event: NSEvent) {
-        if !dragged { session?.click(at: location(event), count: event.clickCount) }
+        if !dragged {
+            session?.click(at: location(event), count: event.clickCount, extend: event.modifierFlags.contains(.command))
+        }
         pressedAt = nil
     }
 
@@ -285,6 +289,8 @@ final class GraphMTKView: MTKView {
         let menu = NSMenu()
         var entries: [(String, Int)] = [("Filter to This", 0), ("Focus on This", 1), ("Copy Details", 2)]
         if case .node(.process) = target { entries.append(("Reveal in Finder", 3)) }
+        if case .node(.network) = target { entries.append(("Expand into Addresses", 4)) }
+        if case .node(.endpoint) = target { entries.append(("Collapse into Its Network", 4)) }
         for (title, tag) in entries {
             let item = NSMenuItem(title: title, action: #selector(contextChosen(_:)), keyEquivalent: "")
             item.target = self
@@ -296,7 +302,7 @@ final class GraphMTKView: MTKView {
 
     @objc private func contextChosen(_ sender: NSMenuItem) {
         guard let contextTarget else { return }
-        let actions: [GraphSession.ContextAction] = [.filterToThis, .focusOnThis, .copyDetails, .revealInFinder]
+        let actions: [GraphSession.ContextAction] = [.filterToThis, .focusOnThis, .copyDetails, .revealInFinder, .toggleCluster]
         session?.context(actions[sender.tag], contextTarget)
     }
 

@@ -95,3 +95,52 @@ public enum Palette {
         }
     }
 }
+
+/// Which set of service colours to use.
+public enum PaletteScheme: String, Sendable, CaseIterable {
+    /// The colours in docs/SPEC.md §9.2.
+    case standard
+    /// Colours chosen to stay distinguishable with the common colour-vision deficiencies.
+    case colorSafe
+
+    private static func rgb(_ hex: UInt32) -> SIMD3<Float> {
+        SIMD3(Float((hex >> 16) & 0xff), Float((hex >> 8) & 0xff), Float(hex & 0xff)) / 255
+    }
+
+    /// The service categories, in a fixed order: TLS, QUIC, DNS, remote access, cleartext, other.
+    public var categories: [SIMD3<Float>] {
+        switch self {
+        case .standard:
+            [Palette.tls, Palette.quic, Palette.dns, Palette.remoteAccess, Palette.cleartext, Palette.other]
+        case .colorSafe:
+            // After Okabe and Ito: sky blue, reddish purple, bluish green, yellow, vermillion,
+            // and a grey dark enough to differ from the purple by lightness alone. Checked
+            // in PaletteTests against simulated protanopia, deuteranopia, and tritanopia.
+            [Self.rgb(0x56B4E9), Self.rgb(0xCC79A7), Self.rgb(0x009E73), Self.rgb(0xF0E442), Self.rgb(0xD55E00), Self.rgb(0x606060)]
+        }
+    }
+
+    public var host: SIMD3<Float> { categories[0] }
+    public var remoteAccess: SIMD3<Float> { categories[3] }
+    public var trunk: SIMD3<Float> { Palette.trunk }
+    /// Connections between two processes on this Mac.
+    public var local: SIMD3<Float> { Palette.other * 1.15 }
+
+    public func color(forService service: String?) -> SIMD3<Float> {
+        categories[Palette.category(forService: service)]
+    }
+}
+
+extension Palette {
+    /// Index into `PaletteScheme.categories` for a service label.
+    public static func category(forService service: String?) -> Int {
+        switch service {
+        case "HTTPS", "HTTPS-alt", "TLS", "IMAPS", "SMTPS", "POP3S", "LDAPS", "MQTT-TLS", "APNs", "FCM", "DNS-over-TLS": 0
+        case "QUIC": 1
+        case "DNS", "mDNS", "LLMNR": 2
+        case "SSH", "RDP", "VNC", "Remote Desktop", "Telnet": 3
+        case "HTTP", "HTTP-alt", "HTTP-dev", "FTP", "SMTP", "IMAP", "POP3", "MQTT": 4
+        default: 5
+        }
+    }
+}

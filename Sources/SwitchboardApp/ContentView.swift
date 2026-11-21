@@ -36,48 +36,17 @@ struct ContentView: View {
     }
 
     private var graph: some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .topLeading) {
-                GraphView(session: model.session)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    if let failure = model.failure {
-                        Text(failure).foregroundStyle(Color.attention)
-                    }
-                    if !model.summary.healthy {
-                        ForEach(model.summary.sources, id: \.self) { Text($0).foregroundStyle(Color.attention) }
-                    }
-                    if model.paused {
-                        Text("PAUSED — collection continues").foregroundStyle(Color.caution)
-                    }
-                    if model.focused {
-                        Text("FOCUS — press esc or double-click empty space to release").foregroundStyle(Color.caution)
-                    }
-                }
-                .font(.mono(11))
-                .padding(12)
-                .allowsHitTesting(false)
-
-                VStack {
-                    Spacer()
-                    HStack {
-                        Text("hover for detail · click to inspect · double-click to focus · space pause · / filter · P profile · 0 reset")
-                        Spacer()
-                        Text(String(format: "%.0f fps · gpu %.1f ms", model.frames.framesPerSecond, model.frames.meanGPUMS))
-                    }
-                    .font(.mono(10))
-                    .foregroundStyle(Color.dim)
-                    .padding(10)
-                }
-                .allowsHitTesting(false)
-
-                if let hover = model.hover {
-                    TooltipView(info: hover)
-                        .fixedSize()
-                        .modifier(TooltipPlacement(point: model.hoverPoint, container: geometry.size))
-                        .allowsHitTesting(false)
+        VStack(spacing: 0) {
+            GeometryReader { geometry in
+                ZStack(alignment: .topLeading) {
+                    GraphView(session: model.session)
+                    GraphStatus(model: model)
+                    GraphFooter(model: model)
+                    HoverLayer(model: model, container: geometry.size)
                 }
             }
+            Rectangle().fill(Color.hairline).frame(height: 1)
+            TimelineBar(model: model)
         }
     }
 
@@ -104,6 +73,111 @@ struct ContentView: View {
         }
         model.writeMeasurement(to: path, measured: measured)
         NSApplication.shared.terminate(nil)
+    }
+}
+
+// The overlays are separate views on purpose. Each reads only what it shows, so a new
+// frame-rate figure or a pointer movement redraws that one overlay and not the whole
+// window, which is what was costing the graph frames.
+
+private struct GraphStatus: View {
+    let model: AppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let failure = model.failure {
+                Text(failure).foregroundStyle(Color.attention)
+            }
+            if !model.summary.healthy {
+                ForEach(model.summary.sources, id: \.self) { Text($0).foregroundStyle(Color.attention) }
+            }
+            if model.focused {
+                Text("FOCUS — press esc or double-click empty space to release").foregroundStyle(Color.caution)
+            }
+        }
+        .font(.mono(11))
+        .padding(12)
+        .allowsHitTesting(false)
+    }
+}
+
+private struct GraphFooter: View {
+    let model: AppModel
+
+    var body: some View {
+        VStack {
+            Spacer()
+            HStack {
+                Text("hover for detail · click to inspect · ⌘-click to add · double-click to focus · right-click for more · / filter")
+                Spacer()
+                Text(String(format: "%.0f fps · gpu %.1f ms", model.frames.framesPerSecond, model.frames.meanGPUMS))
+            }
+            .font(.mono(10))
+            .foregroundStyle(Color.dim)
+            .padding(10)
+        }
+        .allowsHitTesting(false)
+    }
+}
+
+private struct HoverLayer: View {
+    let model: AppModel
+    let container: CGSize
+
+    var body: some View {
+        if let hover = model.hover {
+            TooltipView(info: hover)
+                .fixedSize()
+                .modifier(TooltipPlacement(point: model.hoverPoint, container: container))
+                .allowsHitTesting(false)
+        }
+    }
+}
+
+/// The recent past as a slider. Drag left to go back; the graph and every table follow.
+struct TimelineBar: View {
+    @Bindable var model: AppModel
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Button { model.togglePause() } label: {
+                Image(systemName: model.paused ? "play.fill" : "pause.fill").frame(width: 14)
+            }
+            .buttonStyle(.borderless)
+            .help(model.paused ? "Return to the present" : "Hold this moment. Collection continues.")
+
+            if let range = model.timeRange, range.upperBound - range.lowerBound >= 2 {
+                Text("−" + ByteFormat.duration(range.upperBound - range.lowerBound))
+                    .foregroundStyle(Color.dim)
+                Slider(
+                    value: Binding(
+                        get: { model.scrubTime ?? range.upperBound },
+                        set: { model.scrub(to: $0) }),
+                    in: range)
+                    .controlSize(.mini)
+                    .accessibilityLabel("Timeline")
+                    .accessibilityValue(model.paused ? "\(Int(range.upperBound - (model.scrubTime ?? range.upperBound))) seconds ago" : "live")
+            } else {
+                Text("history builds as the app runs").foregroundStyle(Color.dim)
+                Spacer()
+            }
+
+            if let scrub = model.scrubTime, let range = model.timeRange {
+                Text(Date(timeIntervalSince1970: model.displayedWallClock).formatted(date: .omitted, time: .standard))
+                    .foregroundStyle(Color.caution)
+                Text("−" + ByteFormat.duration(range.upperBound - scrub)).foregroundStyle(Color.caution)
+                Button("LIVE") { model.goLive() }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Color.signal)
+                    .help("Return to the present")
+            } else {
+                Text("LIVE").foregroundStyle(Color.signal)
+            }
+        }
+        .font(.mono(10, .semibold))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 5)
+        .background(Color.panel)
     }
 }
 
@@ -139,6 +213,31 @@ struct TopBar: View {
                         .foregroundStyle(Color.dim)
                         .help("Clear the filter")
                 }
+                Menu {
+                    Button("Save this filter") { model.saveCurrentFilter() }
+                        .disabled(model.filterText.isEmpty || model.filterError != nil)
+                    if !model.savedFilters.isEmpty {
+                        Divider()
+                        ForEach(model.savedFilters, id: \.self) { saved in
+                            Button(saved) {
+                                model.filterText = saved
+                                model.applyFilter()
+                            }
+                        }
+                        Divider()
+                        Menu("Remove") {
+                            ForEach(model.savedFilters, id: \.self) { saved in
+                                Button(saved) { model.removeSavedFilter(saved) }
+                            }
+                        }
+                    }
+                } label: {
+                    Image(systemName: "star")
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("Saved filters")
                 Button { showHelp.toggle() } label: { Image(systemName: "questionmark.circle") }
                     .buttonStyle(.plain)
                     .foregroundStyle(Color.dim)
@@ -150,6 +249,27 @@ struct TopBar: View {
             .background(Color.panel)
             .overlay(Rectangle().strokeBorder(model.filterError == nil ? Color.hairline : Color.attention, lineWidth: 1))
             .frame(minWidth: 260, maxWidth: 620)
+            .overlay(alignment: .bottomLeading) {
+                // Field names that complete the word being typed.
+                if filterFocused, !model.filterSuggestions.isEmpty {
+                    HStack(spacing: 6) {
+                        ForEach(model.filterSuggestions, id: \.self) { field in
+                            Button(field) { model.complete(with: field) }
+                                .buttonStyle(.plain)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.hairline)
+                                .foregroundStyle(Color.signal)
+                        }
+                    }
+                    .font(.mono(10))
+                    .padding(4)
+                    .background(Color.panel)
+                    .overlay(Rectangle().strokeBorder(Color.hairline, lineWidth: 1))
+                    .offset(y: 30)
+                }
+            }
+            .zIndex(1)
 
             Text(model.filterError ?? model.matchLine)
                 .font(.mono(10))
@@ -171,8 +291,6 @@ struct TopBar: View {
             .frame(width: 210)
             .help("How much motion and glow to use. The data shown is the same.")
 
-            Button { model.togglePause() } label: { Image(systemName: model.paused ? "play.fill" : "pause.fill") }
-                .help(model.paused ? "Resume the display" : "Pause the display. Collection continues.")
             Button { model.showPanel.toggle() } label: { Image(systemName: "rectangle.bottomthird.inset.filled") }
                 .help("Show or hide the panels (B)")
             Button { model.showInspector.toggle() } label: { Image(systemName: "sidebar.right") }

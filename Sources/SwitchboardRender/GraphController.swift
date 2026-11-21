@@ -6,11 +6,13 @@ public enum NodeID: Hashable, Sendable {
     case host
     case process(Int32)
     case endpoint(IPAddress)
+    /// Several addresses in one network, drawn as a single node.
+    case network(IPAddress, bits: Int)
 }
 
 public enum PickTarget: Hashable, Sendable {
     case node(NodeID)
-    /// Always process first, endpoint second; or host first, process second.
+    /// Host to process, process to a destination, or process to process for local connections.
     case edge(NodeID, NodeID)
 
     /// The line from this Mac to a process.
@@ -20,18 +22,39 @@ public enum PickTarget: Hashable, Sendable {
     }
 }
 
-/// What the tooltip shows for whatever is under the pointer.
+/// When destinations are merged into one node per network (docs/SPEC.md §10.1).
+public enum Clustering: Sendable, Equatable {
+    case off
+    /// Always merge addresses that share a network.
+    case subnet
+    /// Merge only once there are more destinations than this.
+    case automatic(threshold: Int)
+}
+
+/// What the tooltip and inspector show for a node or edge.
 public struct HoverInfo: Sendable, Equatable {
     public struct Row: Sendable, Equatable, Identifiable {
         public var label: String
         public var value: String
         public var id: String { label }
+
+        public init(label: String, value: String) {
+            self.label = label
+            self.value = value
+        }
     }
 
     public var title: String
     public var subtitle: String
     public var rows: [Row]
     public var footnote: String?
+
+    public init(title: String, subtitle: String, rows: [Row], footnote: String? = nil) {
+        self.title = title
+        self.subtitle = subtitle
+        self.rows = rows
+        self.footnote = footnote
+    }
 }
 
 public struct LabelRequest: Sendable {
@@ -87,12 +110,20 @@ public final class GraphController: @unchecked Sendable {
         var density: Float
         var color: SIMD3<Float>
         var phase: Float
+        /// Sideways curvature, as a fraction of the edge's length.
         var bend: Float
+        /// How far the middle of the edge is drawn toward the centre, 0 to 1.
+        var pull: Float = 0
+
+        func control(_ a: SIMD2<Float>, _ b: SIMD2<Float>) -> SIMD2<Float> {
+            let along = b - a
+            return (a + b) * 0.5 * (1 - pull) + SIMD2(-along.y, along.x) * bend
+        }
     }
 
     private struct EdgeKey: Hashable {
-        var pid: Int32
-        var address: IPAddress
+        var from: NodeID
+        var to: NodeID
     }
 
     private struct Aggregate {
@@ -122,9 +153,23 @@ public final class GraphController: @unchecked Sendable {
             if let service = flow.service { services[service, default: 0] += 1 }
             flows.append(flow)
         }
+
+        mutating func merge(_ other: Aggregate) {
+            rateIn += other.rateIn
+            rateOut += other.rateOut
+            bytesIn &+= other.bytesIn
+            bytesOut &+= other.bytesOut
+            open += other.open
+            total += other.total
+            life = max(life, other.life)
+            services.merge(other.services, uniquingKeysWith: +)
+            flows.append(contentsOf: other.flows)
+        }
     }
 
     private let lock = NSLock()
+    /// Serialises rebuilds, which run outside `lock` so they never hold up a frame.
+    private let buildLock = NSLock()
     private let hostLabel: String
     private var nodes: [Node] = []
     private var edges: [Edge] = []
@@ -132,25 +177,28 @@ public final class GraphController: @unchecked Sendable {
     private var settled = false
     private var arrivals: [NodeID: (bornAt: Float, lastSeen: Float)] = [:]
     private var extent: Float = 420
+    /// Nodes are stored host first, then this many processes, then destinations.
+    private var processCount = 0
 
-    // Kept from the last snapshot for tooltips.
+    // Kept from the last rebuild for tooltips and the inspector.
+    private var nodeAggregates: [NodeID: Aggregate] = [:]
     private var edgeAggregates: [EdgeKey: Aggregate] = [:]
-    private var processAggregates: [Int32: Aggregate] = [:]
-    private var endpointAggregates: [IPAddress: Aggregate] = [:]
+    private var networkMembers: [NodeID: [IPAddress]] = [:]
+    private var nodeForAddress: [IPAddress: NodeID] = [:]
     private var processes: [Int32: ProcessRecord] = [:]
     private var listeners: [Int32: [Listener]] = [:]
     private var snapshotTime: EngineTime = 0
-    private var lastSnapshot: EngineSnapshot?
-    private var lastAnimationTime: Float = 0
+
+    // What to draw, and how.
+    private var liveSnapshot: EngineSnapshot?
+    private var liveTime: Float = 0
+    /// A moment from the past being shown instead of the present.
+    private var heldSnapshot: EngineSnapshot?
     private var activeFilter = FlowFilter.all
     private var focusTarget: PickTarget?
-
-    /// While true, snapshots are ignored and the picture holds still. Collection carries on.
-    public var paused: Bool {
-        get { lock.withLock { isPaused } }
-        set { lock.withLock { isPaused = newValue } }
-    }
-    private var isPaused = false
+    private var clusteringMode = Clustering.automatic(threshold: 300)
+    private var expanded = Set<NodeID>()
+    private var scheme = PaletteScheme.standard
 
     /// Closed flows linger this long before leaving the graph.
     public static let fadeSeconds = 6.0
@@ -159,27 +207,60 @@ public final class GraphController: @unchecked Sendable {
         self.hostLabel = hostLabel
     }
 
-    // MARK: - Building the scene
+    // MARK: - What to show
 
-    /// Rebuilds the graph from the engine's current model. `time` is animation time.
+    /// The engine's current model. Ignored for display while a past moment is held, but
+    /// remembered, so returning to the present is immediate.
     public func update(_ snapshot: EngineSnapshot, time: Float) {
         lock.lock()
-        defer { lock.unlock() }
-        guard !isPaused else { return }
-        lastSnapshot = snapshot
-        lastAnimationTime = time
-        rebuild(snapshot, time: time)
+        liveSnapshot = snapshot
+        liveTime = time
+        lock.unlock()
+        redraw(onlyIfLive: true)
+    }
+
+    /// Shows a past moment instead of the present; `nil` returns to the present.
+    public func hold(_ snapshot: EngineSnapshot?) {
+        lock.withLock { heldSnapshot = snapshot }
+        redraw()
+    }
+
+    /// While true the picture holds at the moment it was paused. Collection carries on.
+    public var paused: Bool {
+        get { lock.withLock { heldSnapshot != nil } }
+        set {
+            lock.withLock { heldSnapshot = newValue ? (heldSnapshot ?? liveSnapshot) : nil }
+            if !newValue { redraw() }
+        }
     }
 
     /// Only flows matching the filter are drawn. Takes effect at once, even while paused.
     public var filter: FlowFilter {
         get { lock.withLock { activeFilter } }
-        set {
-            lock.lock()
-            defer { lock.unlock() }
-            guard newValue != activeFilter else { return }
-            activeFilter = newValue
-            if let lastSnapshot { rebuild(lastSnapshot, time: lastAnimationTime) }
+        set { change { activeFilter = newValue } }
+    }
+
+    public var clustering: Clustering {
+        get { lock.withLock { clusteringMode } }
+        set { change { clusteringMode = newValue } }
+    }
+
+    public var palette: PaletteScheme {
+        get { lock.withLock { scheme } }
+        set { change { scheme = newValue } }
+    }
+
+    /// Opens a network node into its individual addresses, or closes it again.
+    public func toggleExpansion(of node: NodeID) {
+        change {
+            switch node {
+            case .network:
+                expanded.insert(node)
+            case .endpoint(let address):
+                expanded.remove(Self.network(of: address))
+            default:
+                break
+            }
         }
     }
 
@@ -189,13 +270,75 @@ public final class GraphController: @unchecked Sendable {
         set { lock.withLock { focusTarget = newValue } }
     }
 
-    private func rebuild(_ snapshot: EngineSnapshot, time: Float) {
-        processes = Dictionary(uniqueKeysWithValues: snapshot.processes.map { ($0.pid, $0) })
-        let filter = activeFilter
+    private func change(_ body: () -> Void) {
+        lock.withLock(body)
+        redraw()
+    }
 
-        var byEdge: [EdgeKey: Aggregate] = [:]
+    /// Rebuilds the scene from whatever should be on screen. The work happens outside
+    /// `lock`: on a busy machine it takes tens of milliseconds, and a frame waiting on
+    /// the lock for that long is a visible stutter.
+    private func redraw(onlyIfLive: Bool = false) {
+        buildLock.lock()
+        defer { buildLock.unlock() }
+        let (snapshot, time): (EngineSnapshot?, Float) = lock.withLock {
+            if onlyIfLive, heldSnapshot != nil { return (nil, liveTime) }
+            return (heldSnapshot ?? liveSnapshot, liveTime)
+        }
+        if let snapshot { rebuild(snapshot, time: time) }
+    }
+
+    /// The network a destination is grouped into: /24 for IPv4, /48 for IPv6.
+    static func network(of address: IPAddress) -> NodeID {
+        switch address {
+        case .v4(let value): .network(.v4(value & 0xffff_ff00), bits: 24)
+        case .v6(let hi, _): .network(.v6(hi: hi & 0xffff_ffff_ffff_0000, lo: 0), bits: 48)
+        }
+    }
+
+    // MARK: - Building the scene
+
+    private struct AddressEdge: Hashable {
+        var pid: Int32
+        var address: IPAddress
+    }
+
+    private struct PeerEdge: Hashable {
+        var from: Int32
+        var to: Int32
+    }
+
+    private struct PortKey: Hashable {
+        var proto: TransportProtocol
+        var port: UInt16
+    }
+
+    private func rebuild(_ snapshot: EngineSnapshot, time: Float) {
+        let processes = Dictionary(uniqueKeysWithValues: snapshot.processes.map { ($0.pid, $0) })
+        let listeners = Dictionary(grouping: snapshot.listeners, by: \.pid)
+
+        // Take what is needed from shared state, then let go of the lock for the heavy part.
+        lock.lock()
+        let filter = activeFilter
+        let clusteringMode = self.clusteringMode
+        let expanded = self.expanded
+        let scheme = self.scheme
+        var arrivals = self.arrivals
+        let previous = Dictionary(uniqueKeysWithValues: nodes.map { ($0.id, $0) })
+        lock.unlock()
+
+        // Who is listening on each local port, to pair up connections within this Mac.
+        var listening: [PortKey: Int32] = [:]
+        for listener in snapshot.listeners {
+            let key = PortKey(proto: listener.proto, port: listener.local.port)
+            if let current = listening[key], current <= listener.pid { continue }
+            listening[key] = listener.pid
+        }
+
         var byProcess: [Int32: Aggregate] = [:]
-        var byEndpoint: [IPAddress: Aggregate] = [:]
+        var byAddress: [IPAddress: Aggregate] = [:]
+        var byAddressEdge: [AddressEdge: Aggregate] = [:]
+        var byPeer: [PeerEdge: Aggregate] = [:]
         for flow in snapshot.flows {
             if !filter.isEmpty, !filter.matches(flow, process: processes[flow.pid], now: snapshot.time) { continue }
             var life = 1.0
@@ -204,21 +347,53 @@ public final class GraphController: @unchecked Sendable {
                 guard life > 0 else { continue }
             }
             byProcess[flow.pid, default: Aggregate()].add(flow, life: life)
-            // A loopback connection is this Mac talking to itself. It counts toward the
-            // process and its line to the centre, but gets no node of its own: one shared
-            // "127.0.0.1" would pull lines from every corner of the graph.
-            if flow.key.remote.address.isLoopback { continue }
-            byEdge[EdgeKey(pid: flow.pid, address: flow.key.remote.address), default: Aggregate()].add(flow, life: life)
-            byEndpoint[flow.key.remote.address, default: Aggregate()].add(flow, life: life)
+
+            let remote = flow.key.remote
+            if remote.address.isLoopback {
+                // This Mac talking to itself. If we can tell which process is listening on
+                // the far port, draw a line between the two processes; either way there is
+                // no "127.0.0.1" node, which would pull lines from all over the graph.
+                if let peer = listening[PortKey(proto: flow.key.proto, port: remote.port)], peer != flow.pid {
+                    byPeer[PeerEdge(from: flow.pid, to: peer), default: Aggregate()].add(flow, life: life)
+                }
+                continue
+            }
+            byAddress[remote.address, default: Aggregate()].add(flow, life: life)
+            byAddressEdge[AddressEdge(pid: flow.pid, address: remote.address), default: Aggregate()].add(flow, life: life)
         }
 
-        edgeAggregates = byEdge
-        processAggregates = byProcess
-        endpointAggregates = byEndpoint
-        listeners = Dictionary(grouping: snapshot.listeners, by: \.pid)
-        snapshotTime = snapshot.time
+        // Clustering: addresses sharing a network become one node.
+        let clusteringActive: Bool
+        switch clusteringMode {
+        case .off: clusteringActive = false
+        case .subnet: clusteringActive = true
+        case .automatic(let threshold): clusteringActive = byAddress.count > threshold
+        }
+        var nodeFor: [IPAddress: NodeID] = [:]
+        var members: [NodeID: [IPAddress]] = [:]
+        if clusteringActive {
+            for (network, addresses) in Dictionary(grouping: byAddress.keys, by: Self.network(of:))
+            where addresses.count >= 2 && !expanded.contains(network) {
+                for address in addresses { nodeFor[address] = network }
+                members[network] = addresses.sorted(by: Self.addressOrder)
+            }
+        }
 
-        let previous = Dictionary(uniqueKeysWithValues: nodes.map { ($0.id, $0) })
+        var remotes: [NodeID: Aggregate] = [:]
+        for (address, aggregate) in byAddress {
+            remotes[nodeFor[address] ?? .endpoint(address), default: Aggregate()].merge(aggregate)
+        }
+        var links: [EdgeKey: Aggregate] = [:]
+        for (key, aggregate) in byAddressEdge {
+            let to = nodeFor[key.address] ?? .endpoint(key.address)
+            links[EdgeKey(from: .process(key.pid), to: to), default: Aggregate()].merge(aggregate)
+        }
+        // A local connection is drawn only when both of its processes are in view.
+        var peers: [EdgeKey: Aggregate] = [:]
+        for (key, aggregate) in byPeer where byProcess[key.to] != nil {
+            peers[EdgeKey(from: .process(key.from), to: .process(key.to))] = aggregate
+        }
+
         // When did each node first appear? Remembered for a minute after it leaves, so a
         // process that reconnects every few seconds is not announced as new each time.
         func born(_ id: NodeID) -> Float {
@@ -226,12 +401,13 @@ public final class GraphController: @unchecked Sendable {
             arrivals[id] = (at, time)
             return at
         }
+
         var built: [Node] = []
-        built.reserveCapacity(byProcess.count + byEndpoint.count + 1)
+        built.reserveCapacity(byProcess.count + remotes.count + 1)
 
         // This Mac, at the centre.
         built.append(Node(
-            id: .host, position: .zero, anchor: .zero, radius: 15, color: Palette.host, intensity: 1,
+            id: .host, position: .zero, anchor: .zero, radius: 15, color: scheme.host, intensity: 1,
             bornAt: -100, label: hostLabel, priority: .infinity))
 
         // Processes on a ring, each at an angle fixed by its name.
@@ -258,74 +434,123 @@ public final class GraphController: @unchecked Sendable {
                 bornAt: born(id), label: Self.clip(record?.name ?? "pid \(pid)", to: 22),
                 priority: 1e15 + aggregate.rate, iconPath: record?.path)
             // A process listening on a non-loopback address is reachable from outside.
-            if exposed { node.ring = SIMD4(Palette.remoteAccess, 0.85) }
+            if exposed { node.ring = SIMD4(scheme.remoteAccess, 0.85) }
             built.append(node)
         }
 
-        // Remote endpoints beyond the ring, each in the sector of the process that uses it most.
-        var owner: [IPAddress: (pid: Int32, bytes: UInt64)] = [:]
-        for (key, aggregate) in byEdge {
-            if let current = owner[key.address], (current.bytes, -Int64(current.pid)) >= (aggregate.bytes, -Int64(key.pid)) {
-                continue
-            }
-            owner[key.address] = (key.pid, aggregate.bytes)
+        // Destinations beyond the ring, each in the sector of the process that uses it most.
+        var owner: [NodeID: (pid: Int32, bytes: UInt64)] = [:]
+        var destinationCount: [Int32: Int] = [:]
+        for (key, aggregate) in links {
+            guard case .process(let pid) = key.from else { continue }
+            destinationCount[pid, default: 0] += 1
+            if let current = owner[key.to], (current.bytes, -Int64(current.pid)) >= (aggregate.bytes, -Int64(pid)) { continue }
+            owner[key.to] = (pid, aggregate.bytes)
         }
         var owned: [Int32: Int] = [:]
         for entry in owner.values { owned[entry.pid, default: 0] += 1 }
 
         var farthest = ringRadius
-        for address in byEndpoint.keys.sorted(by: Self.addressOrder) {
-            let aggregate = byEndpoint[address]!
-            let ownerPID = owner[address]!.pid
+        for id in remotes.keys.sorted(by: Self.remoteOrder) {
+            let aggregate = remotes[id]!
+            guard let ownerPID = owner[id]?.pid else { continue }
             let count = Float(owned[ownerPID] ?? 1)
-            let text = address.description
+            let size = members[id]?.count ?? 1
+            let text: String
+            switch id {
+            case .network(let address, let bits): text = "\(address)/\(bits)"
+            case .endpoint(let address): text = address.description
+            default: text = ""
+            }
             let fan = min(1.5, sector * 0.85 + 0.05 * count.squareRoot())
             let angle = (processAngle[ownerPID] ?? 0) + (Self.unit(text, salt: 0xA1) - 0.5) * fan
             let radius = ringRadius + 170 + Self.unit(text, salt: 0xB2) * (130 + 30 * count.squareRoot())
             farthest = max(farthest, radius)
             let anchor = SIMD2(cos(angle), sin(angle)) * radius
-            let id = NodeID.endpoint(address)
             let start = previous[.process(ownerPID)]?.position ?? SIMD2(cos(angle), sin(angle)) * ringRadius
-            built.append(Node(
+            let color = scheme.color(forService: aggregate.service)
+            var node = Node(
                 id: id, position: previous[id]?.position ?? start, anchor: anchor,
-                radius: 2.6 + 6 * Self.level(Double(aggregate.bytes), scale: 9),
-                color: Palette.color(forService: aggregate.service),
+                radius: 2.6 + 6 * Self.level(Double(aggregate.bytes), scale: 9) + (size > 1 ? 2 + min(4, log2(Float(size))) : 0),
+                color: color,
                 intensity: (0.3 + 0.7 * Self.level(aggregate.rate, scale: 6.5)) * Float(max(aggregate.life, 0.15)),
-                bornAt: born(id), label: text, priority: aggregate.rate + Double(aggregate.bytes) * 1e-9))
+                bornAt: born(id), label: size > 1 ? "\(text) ×\(size)" : text,
+                priority: aggregate.rate + Double(aggregate.bytes) * 1e-9)
+            // A ring marks a node that stands for several addresses.
+            if size > 1 { node.ring = SIMD4(color, 0.55) }
+            built.append(node)
         }
 
         var lookup: [NodeID: Int] = [:]
         lookup.reserveCapacity(built.count)
         for (offset, node) in built.enumerated() { lookup[node.id] = offset }
 
-        var links: [Edge] = []
-        links.reserveCapacity(byEdge.count + pids.count)
+        var drawn: [Edge] = []
+        drawn.reserveCapacity(links.count + pids.count + peers.count)
         for pid in pids {
             guard let to = lookup[.process(pid)], let aggregate = byProcess[pid] else { continue }
-            links.append(Self.edge(
-                from: 0, to: to, target: .edge(.host, .process(pid)), aggregate: aggregate, color: Palette.trunk,
+            drawn.append(Self.edge(
+                from: 0, to: to, target: .edge(.host, .process(pid)), aggregate: aggregate, color: scheme.trunk,
                 seed: "trunk \(pid)", bend: 0, outbound: aggregate.rateOut >= aggregate.rateIn, trunk: true))
         }
-        let orderedKeys = byEdge.keys.sorted { a, b in
-            a.pid != b.pid ? a.pid < b.pid : Self.addressOrder(a.address, b.address)
+        let orderedLinks = links.keys.sorted { a, b in
+            a.from != b.from ? Self.remoteOrder(a.from, b.from) : Self.remoteOrder(a.to, b.to)
         }
-        for key in orderedKeys {
-            guard let aggregate = byEdge[key], let process = lookup[.process(key.pid)], let endpoint = lookup[.endpoint(key.address)]
+        for key in orderedLinks {
+            guard let aggregate = links[key], let process = lookup[key.from], let remote = lookup[key.to],
+                  case .process(let pid) = key.from
             else { continue }
-            let seed = "\(key.pid) \(key.address)"
+            // The seed fixes each edge's curve and pulse timing; it is spelled the same way
+            // for a plain address as it always has been, so existing pictures do not shift.
+            let far: String
+            switch key.to {
+            case .endpoint(let address): far = address.description
+            case .network(let address, let bits): far = "\(address)/\(bits)"
+            default: far = ""
+            }
+            let seed = "\(pid) \(far)"
             // A process with many destinations gets dimmer edges, so a fan of hundreds
             // reads as a texture rather than burning out to white.
-            let crowd = Float(byProcess[key.pid]?.flows.reduce(into: Set<IPAddress>()) { $0.insert($1.key.remote.address) }.count ?? 1)
-            links.append(Self.edge(
-                from: process, to: endpoint, target: .edge(.process(key.pid), .endpoint(key.address)), aggregate: aggregate,
-                color: Palette.color(forService: aggregate.service), seed: seed,
+            let crowd = Float(destinationCount[pid] ?? 1)
+            drawn.append(Self.edge(
+                from: process, to: remote, target: .edge(key.from, key.to), aggregate: aggregate,
+                color: scheme.color(forService: aggregate.service), seed: seed,
                 bend: (Self.unit(seed, salt: 0xC3) - 0.5) * 0.26, outbound: aggregate.rateOut >= aggregate.rateIn, trunk: false,
                 dimming: min(1, pow(10 / max(crowd, 1), 0.6))))
         }
+        // Local connections curve through the middle of the ring, from client to server.
+        for key in peers.keys.sorted(by: { a, b in a.from != b.from ? Self.remoteOrder(a.from, b.from) : Self.remoteOrder(a.to, b.to) }) {
+            guard let aggregate = peers[key], let from = lookup[key.from], let to = lookup[key.to] else { continue }
+            var edge = Self.edge(
+                from: from, to: to, target: .edge(key.from, key.to), aggregate: aggregate, color: scheme.local,
+                seed: "\(key.from) \(key.to)", bend: 0, outbound: true, trunk: false)
+            edge.pull = 0.55
+            drawn.append(edge)
+        }
 
-        arrivals = arrivals.filter { time - $0.value.lastSeen < 60 }
+        var aggregates = remotes
+        for (pid, aggregate) in byProcess { aggregates[.process(pid)] = aggregate }
+        let allEdges = links.merging(peers) { first, _ in first }
+        let remembered = arrivals.filter { time - $0.value.lastSeen < 60 }
+
+        lock.lock()
+        defer { lock.unlock() }
+        // The layout kept running while this was worked out; keep where nodes have got to.
+        let current = Dictionary(uniqueKeysWithValues: nodes.map { ($0.id, $0.position) })
+        for offset in built.indices {
+            if let position = current[built[offset].id] { built[offset].position = position }
+        }
+        self.processes = processes
+        self.listeners = listeners
+        snapshotTime = snapshot.time
+        nodeAggregates = aggregates
+        edgeAggregates = allEdges
+        networkMembers = members
+        nodeForAddress = nodeFor
+        processCount = pids.count
+        self.arrivals = remembered
         nodes = built
-        edges = links
+        edges = drawn
         index = lookup
         extent = farthest + 90
         settled = false
@@ -347,13 +572,32 @@ public final class GraphController: @unchecked Sendable {
             color: color, phase: unit(seed, salt: 0xD4), bend: bend)
     }
 
+    /// A stable order for nodes: processes by pid, destinations by address, a single
+    /// address before the network that contains it.
+    private static func remoteOrder(_ a: NodeID, _ b: NodeID) -> Bool {
+        func key(_ id: NodeID) -> (Int, Int, UInt64, UInt64, Int) {
+            switch id {
+            case .host: return (0, 0, 0, 0, 0)
+            case .process(let pid): return (1, 0, 0, UInt64(UInt32(bitPattern: pid)), 0)
+            case .endpoint(let address), .network(let address, _):
+                let isNetwork: Int
+                if case .network = id { isNetwork = 1 } else { isNetwork = 0 }
+                switch address {
+                case .v4(let value): return (2, 0, 0, UInt64(value), isNetwork)
+                case .v6(let hi, let lo): return (2, 1, hi, lo, isNetwork)
+                }
+            }
+        }
+        return key(a) < key(b)
+    }
+
     // MARK: - Layout
 
     /// One relaxation step: every node drifts to its anchor while overlapping nodes push apart.
     public func step() {
         lock.lock()
         defer { lock.unlock() }
-        guard !settled, !isPaused, nodes.count > 1 else { return }
+        guard !settled, nodes.count > 1 else { return }
 
         var moved: Float = 0
         var push = [SIMD2<Float>](repeating: .zero, count: nodes.count)
@@ -405,10 +649,12 @@ public final class GraphController: @unchecked Sendable {
         }
     }
 
+
     // MARK: - Rendering
 
-    /// The current picture. `labelBudget` is how many endpoints may carry a label.
-    public func frame(labelBudget: Int, highlight: PickTarget? = nil) -> RenderFrame {
+    /// The current picture. `labelBudget` is how many destinations may carry a label;
+    /// `highlights` are lit and their neighbours with them.
+    public func frame(labelBudget: Int, highlights: Set<PickTarget> = []) -> RenderFrame {
         lock.lock()
         defer { lock.unlock() }
         var frame = RenderFrame()
@@ -416,8 +662,8 @@ public final class GraphController: @unchecked Sendable {
         frame.nodes.reserveCapacity(nodes.count)
         frame.edges.reserveCapacity(edges.count)
 
-        var highlightedNode: NodeID?
-        if case .node(let id) = highlight { highlightedNode = id }
+        var highlightedNodes = Set<NodeID>()
+        for case .node(let id) in highlights { highlightedNodes.insert(id) }
 
         // In focus mode, work out which nodes belong to the focused neighbourhood.
         var inFocus: Set<Int>?
@@ -436,7 +682,7 @@ public final class GraphController: @unchecked Sendable {
             var ring = node.ring
             var intensity = node.intensity
             if let inFocus, !inFocus.contains(offset) { intensity *= 0.18 }
-            if node.id == highlightedNode {
+            if highlightedNodes.contains(node.id) {
                 ring = SIMD4(1, 1, 1, 1)
                 intensity = 1
             }
@@ -449,8 +695,6 @@ public final class GraphController: @unchecked Sendable {
 
         for edge in edges {
             let a = nodes[edge.from].position, b = nodes[edge.to].position
-            let along = b - a
-            let control = (a + b) * 0.5 + SIMD2(-along.y, along.x) * edge.bend
             var glow = edge.glow
             var pulse = edge.pulse
             var halfWidth = edge.halfWidth
@@ -458,9 +702,8 @@ public final class GraphController: @unchecked Sendable {
                 glow *= 0.1
                 pulse = 0
             }
-            if let highlight {
-                let touches = Self.touches(edge, highlight, nodes)
-                if touches {
+            if !highlights.isEmpty {
+                if highlights.contains(where: { Self.touches(edge, $0, nodes) }) {
                     glow = glow * 1.8 + 0.22
                     halfWidth += 0.6
                 } else {
@@ -468,24 +711,26 @@ public final class GraphController: @unchecked Sendable {
                 }
             }
             frame.edges.append(EdgeInstance(
-                p0: a, p1: b, control: control, halfWidth: halfWidth, phase: edge.phase,
+                p0: a, p1: b, control: edge.control(a, b), halfWidth: halfWidth, phase: edge.phase,
                 color: SIMD4(edge.color, 1), speed: edge.speed, density: edge.density, glow: glow, pulse: pulse))
         }
 
-        // The host and every process are named; endpoints compete for the remaining labels.
+        // The host and every process are named; destinations compete for the remaining labels.
         if !nodes.isEmpty { frame.labels.append(LabelRequest(text: nodes[0].label, node: 0, kind: 0)) }
         let named = (1..<min(processCount + 1, nodes.count)).sorted { nodes[$0].priority > nodes[$1].priority }
         for offset in named.prefix(160) where inFocus?.contains(offset) ?? true {
             frame.labels.append(LabelRequest(text: nodes[offset].label, node: offset, kind: 1))
         }
-        let endpoints = nodes.indices.dropFirst(processCount + 1)
-        var chosen = endpoints.filter { nodes[$0].priority > 1 && (inFocus?.contains($0) ?? true) }
+        let destinations = nodes.indices.dropFirst(processCount + 1)
+        var chosen = destinations.filter { nodes[$0].priority > 1 && (inFocus?.contains($0) ?? true) }
             .sorted { nodes[$0].priority > nodes[$1].priority }.prefix(labelBudget).map { $0 }
-        if let highlightedNode, let offset = index[highlightedNode], offset > processCount, !chosen.contains(offset) {
-            chosen.append(offset)
-        }
-        if case .edge(_, let far) = highlight, let offset = index[far], offset > processCount, !chosen.contains(offset) {
-            chosen.append(offset)
+        for highlight in highlights {
+            let far: NodeID?
+            switch highlight {
+            case .node(let id): far = id
+            case .edge(_, let to): far = to
+            }
+            if let far, let offset = index[far], offset > processCount, !chosen.contains(offset) { chosen.append(offset) }
         }
         for offset in chosen {
             frame.labels.append(LabelRequest(text: nodes[offset].label, node: offset, kind: 2))
@@ -501,16 +746,24 @@ public final class GraphController: @unchecked Sendable {
         }
     }
 
+    // MARK: - Looking things up
+
     /// The flows behind a node or edge, for the inspector.
     public func flows(for target: PickTarget) -> [Flow] {
         lock.lock()
         defer { lock.unlock() }
+        return aggregate(for: target)?.flows ?? []
+    }
+
+    private func aggregate(for target: PickTarget) -> Aggregate? {
         switch target {
-        case .node(.host): return processAggregates.values.flatMap(\.flows)
-        case .node(.process(let pid)), .edge(.host, .process(let pid)): return processAggregates[pid]?.flows ?? []
-        case .node(.endpoint(let address)): return endpointAggregates[address]?.flows ?? []
-        case .edge(.process(let pid), .endpoint(let address)): return edgeAggregates[EdgeKey(pid: pid, address: address)]?.flows ?? []
-        default: return []
+        case .node(.host):
+            var all = Aggregate()
+            for (id, aggregate) in nodeAggregates { if case .process = id { all.merge(aggregate) } }
+            return all
+        case .node(let id): return nodeAggregates[id]
+        case .edge(.host, let process): return nodeAggregates[process]
+        case .edge(let from, let to): return edgeAggregates[EdgeKey(from: from, to: to)]
         }
     }
 
@@ -518,8 +771,20 @@ public final class GraphController: @unchecked Sendable {
         lock.withLock { processes[pid] }
     }
 
-    /// Nodes are stored host first, then processes, then endpoints.
-    private var processCount: Int { processAggregates.count }
+    /// The node or edge that currently represents a connection, allowing for clustering
+    /// and for local connections drawn between processes.
+    public func target(pid: Int32, remote: Endpoint, proto: TransportProtocol) -> PickTarget {
+        lock.lock()
+        defer { lock.unlock() }
+        if remote.address.isLoopback {
+            let peer = edgeAggregates.keys.first { key in
+                guard key.from == .process(pid), case .process = key.to else { return false }
+                return edgeAggregates[key]?.flows.contains { $0.key.remote == remote && $0.key.proto == proto } ?? false
+            }
+            return peer.map { .edge($0.from, $0.to) } ?? .node(.process(pid))
+        }
+        return .edge(.process(pid), nodeForAddress[remote.address] ?? .endpoint(remote.address))
+    }
 
     // MARK: - Picking
 
@@ -538,13 +803,12 @@ public final class GraphController: @unchecked Sendable {
 
         for edge in edges {
             let a = nodes[edge.from].position, b = nodes[edge.to].position
-            let along = b - a
-            let control = (a + b) * 0.5 + SIMD2(-along.y, along.x) * edge.bend
+            let control = edge.control(a, b)
             var nearest = Float.infinity
             var previous = a
             for step in 1...12 {
-                let t = Float(step) / 12
-                let next = simd_mix(simd_mix(a, control, SIMD2(repeating: t)), simd_mix(control, b, SIMD2(repeating: t)), SIMD2(repeating: t))
+                let t = SIMD2<Float>(repeating: Float(step) / 12)
+                let next = simd_mix(simd_mix(a, control, t), simd_mix(control, b, t), t)
                 nearest = min(nearest, Self.distance(from: point, toSegment: previous, next))
                 previous = next
             }
@@ -568,32 +832,49 @@ public final class GraphController: @unchecked Sendable {
     public func info(for target: PickTarget) -> HoverInfo? {
         lock.lock()
         defer { lock.unlock() }
+        guard let aggregate = aggregate(for: target) else { return nil }
+        func name(_ pid: Int32) -> String { processes[pid]?.name ?? "pid \(pid)" }
+
         switch target {
         case .node(.host):
-            let open = processAggregates.values.reduce(0) { $0 + $1.open }
-            let rateIn = processAggregates.values.reduce(0) { $0 + $1.rateIn }
-            let rateOut = processAggregates.values.reduce(0) { $0 + $1.rateOut }
             let exposed = listeners.values.joined().filter(\.exposed).count
+            let destinations = nodeAggregates.keys.count { if case .process = $0 { false } else { true } }
             return HoverInfo(
-                title: hostLabel, subtitle: "\(processAggregates.count) processes on the network",
+                title: hostLabel, subtitle: "\(processCount) processes on the network",
                 rows: [
-                    .init(label: "Connections", value: "\(open)"),
-                    .init(label: "Destinations", value: "\(endpointAggregates.count)"),
-                    .init(label: "Rate", value: "↓ \(ByteFormat.rate(rateIn))  ↑ \(ByteFormat.rate(rateOut))"),
+                    .init(label: "Connections", value: "\(aggregate.open)"),
+                    .init(label: "Destinations", value: "\(destinations)"),
+                    .init(label: "Rate", value: "↓ \(ByteFormat.rate(aggregate.rateIn))  ↑ \(ByteFormat.rate(aggregate.rateOut))"),
                     .init(label: "Listening", value: "\(listeners.values.joined().count) sockets, \(exposed) exposed"),
                 ])
+
         case .node(.process(let pid)), .edge(.host, .process(let pid)):
-            guard let aggregate = processAggregates[pid] else { return nil }
             return processInfo(pid, aggregate)
+
         case .node(.endpoint(let address)):
-            guard let aggregate = endpointAggregates[address] else { return nil }
-            let users = Set(aggregate.flows.map(\.pid)).sorted().map { processes[$0]?.name ?? "pid \($0)" }
+            let users = Set(aggregate.flows.map(\.pid)).sorted().map(name)
             var rows = trafficRows(aggregate)
             rows.insert(.init(label: "Used by", value: Self.list(users)), at: 0)
             return HoverInfo(title: address.description, subtitle: Self.classification(address), rows: rows, footnote: nil)
-        case .edge(.process(let pid), .endpoint(let address)):
-            guard let aggregate = edgeAggregates[EdgeKey(pid: pid, address: address)] else { return nil }
-            let name = processes[pid]?.name ?? "pid \(pid)"
+
+        case .node(.network(let address, let bits)):
+            let addresses = networkMembers[.network(address, bits: bits)] ?? []
+            let users = Set(aggregate.flows.map(\.pid)).sorted().map(name)
+            var rows = trafficRows(aggregate)
+            rows.insert(.init(label: "Used by", value: Self.list(users)), at: 0)
+            rows.insert(.init(label: "Addresses", value: Self.list(addresses.map(\.description), limit: 3)), at: 1)
+            return HoverInfo(
+                title: "\(address)/\(bits)", subtitle: "\(addresses.count) addresses in one network · \(Self.classification(address))",
+                rows: rows, footnote: "Right-click to expand into separate addresses")
+
+        case .edge(.process(let from), .process(let to)):
+            var rows = trafficRows(aggregate)
+            let ports = Set(aggregate.flows.map(\.key.remote.port)).sorted().map(String.init)
+            rows.insert(.init(label: "Local port", value: Self.list(ports)), at: 0)
+            return HoverInfo(
+                title: "\(name(from)) → \(name(to))", subtitle: "pid \(from) to pid \(to) · within this Mac", rows: rows, footnote: nil)
+
+        case .edge(.process(let pid), let remote):
             var rows = trafficRows(aggregate)
             // The busiest connection, spelled out in full.
             if let flow = aggregate.flows.max(by: { ($0.rateTotal, $0.bytesTotal) < ($1.rateTotal, $1.bytesTotal) }) {
@@ -605,8 +886,20 @@ public final class GraphController: @unchecked Sendable {
                 }
                 if let interface = flow.interface { rows.append(.init(label: "Interface", value: interface)) }
             }
-            return HoverInfo(
-                title: "\(name) → \(address)", subtitle: "pid \(pid) · \(Self.classification(address))", rows: rows, footnote: nil)
+            let far: String, kind: String
+            switch remote {
+            case .network(let address, let bits):
+                far = "\(address)/\(bits)"
+                kind = Self.classification(address)
+            case .endpoint(let address):
+                far = address.description
+                kind = Self.classification(address)
+            default:
+                far = "?"
+                kind = ""
+            }
+            return HoverInfo(title: "\(name(pid)) → \(far)", subtitle: "pid \(pid) · \(kind)", rows: rows, footnote: nil)
+
         default:
             return nil
         }

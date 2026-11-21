@@ -201,7 +201,7 @@ private func flow(pid: Int32, remote: String, port: UInt16 = 443, id: UInt64) ->
     @Test func highlightingBrightensWhatIsHoveredAndDimsTheRest() {
         let (controller, _) = simulated()
         let plain = controller.frame(labelBudget: 0)
-        let lit = controller.frame(labelBudget: 0, highlight: .node(.process(2010)))
+        let lit = controller.frame(labelBudget: 0, highlights: [.node(.process(2010))])
         let index = plain.nodes.indices.first { lit.nodes[$0].ring == SIMD4<Float>(1, 1, 1, 1) }
         #expect(index != nil)
         let brighter = zip(plain.edges, lit.edges).filter { $0.1.glow > $0.0.glow }.count
@@ -279,5 +279,121 @@ private func flow(pid: Int32, remote: String, port: UInt16 = 443, id: UInt64) ->
         #expect(!edge.isEmpty)
         #expect(edge.allSatisfy { $0.pid == 2010 && $0.key.remote.address == address })
         #expect(controller.flows(for: .node(.endpoint(address))).count >= edge.count)
+    }
+}
+
+@Suite struct ClusteringAndLocalEdgeTests {
+    private func events(_ count: Int, network: String, pid: Int32 = 1, start: UInt64 = 1) -> [SourceEvent] {
+        (0..<count).map { flow(pid: pid, remote: "\(network).\($0 + 10)", id: start + UInt64($0)) }
+    }
+
+    @Test func mergesAddressesInOneNetworkIntoOneNode() {
+        let engine = FlowEngine()
+        engine.ingest(events(5, network: "52.21.130") + [flow(pid: 1, remote: "8.8.8.8", id: 99)], from: "test", at: 0)
+        let controller = GraphController()
+        controller.clustering = .off
+        controller.update(engine.snapshot(), time: 0)
+        #expect(controller.frame(labelBudget: 0).nodes.count == 8)
+
+        controller.clustering = .subnet
+        let network = NodeID.network(IPAddress("52.21.130.0")!, bits: 24)
+        // Selecting a node always shows its label, however quiet it is.
+        let clustered = controller.frame(labelBudget: 20, highlights: [.node(network)])
+        // Host, process, one network node, and the address that is alone in its network.
+        #expect(clustered.nodes.count == 4)
+        #expect(clustered.labels.contains { $0.text == "52.21.130.0/24 ×5" })
+        #expect(controller.flows(for: .node(network)).count == 5)
+        #expect(controller.info(for: .node(network))?.subtitle.hasPrefix("5 addresses") == true)
+        // A connection is found on the node that now stands for it.
+        let target = controller.target(pid: 1, remote: Endpoint(address: IPAddress("52.21.130.12")!, port: 443), proto: .tcp)
+        #expect(target == .edge(.process(1), network))
+    }
+
+    @Test func clustersAutomaticallyOnlyPastTheThreshold() {
+        let engine = FlowEngine()
+        engine.ingest(events(6, network: "52.21.130"), from: "test", at: 0)
+        let controller = GraphController()
+        controller.clustering = .automatic(threshold: 10)
+        controller.update(engine.snapshot(), time: 0)
+        #expect(controller.frame(labelBudget: 0).nodes.count == 8)
+        controller.clustering = .automatic(threshold: 5)
+        #expect(controller.frame(labelBudget: 0).nodes.count == 3)
+    }
+
+    @Test func expandsAndCollapsesANetworkOnRequest() {
+        let engine = FlowEngine()
+        engine.ingest(events(4, network: "52.21.130"), from: "test", at: 0)
+        let controller = GraphController()
+        controller.clustering = .subnet
+        controller.update(engine.snapshot(), time: 0)
+        let network = NodeID.network(IPAddress("52.21.130.0")!, bits: 24)
+        #expect(controller.frame(labelBudget: 0).nodes.count == 3)
+        controller.toggleExpansion(of: network)
+        #expect(controller.frame(labelBudget: 0).nodes.count == 6)
+        controller.toggleExpansion(of: .endpoint(IPAddress("52.21.130.11")!))
+        #expect(controller.frame(labelBudget: 0).nodes.count == 3)
+    }
+
+    @Test func groupsIPv6ByItsFirst48Bits() {
+        #expect(GraphController.network(of: IPAddress("2606:4700:10:1::5")!) == .network(IPAddress("2606:4700:10::")!, bits: 48))
+        #expect(GraphController.network(of: IPAddress("10.1.2.3")!) == .network(IPAddress("10.1.2.0")!, bits: 24))
+    }
+
+    @Test func drawsALocalConnectionBetweenItsTwoProcesses() {
+        let engine = FlowEngine()
+        let listener = SourceEvent.seen(SocketObservation(
+            sourceID: 1, proto: .tcp, local: Endpoint(address: IPAddress("127.0.0.1")!, port: 5432),
+            remote: Endpoint(address: IPAddress("0.0.0.0")!, port: 0), pid: 20, processName: "postgres", tcpState: .listen))
+        // The same connection as each end sees it.
+        let client = SourceEvent.seen(SocketObservation(
+            sourceID: 2, proto: .tcp, local: Endpoint(address: IPAddress("127.0.0.1")!, port: 51_000),
+            remote: Endpoint(address: IPAddress("127.0.0.1")!, port: 5432), pid: 10, processName: "node",
+            rxBytes: 900, txBytes: 100, tcpState: .established))
+        let server = SourceEvent.seen(SocketObservation(
+            sourceID: 3, proto: .tcp, local: Endpoint(address: IPAddress("127.0.0.1")!, port: 5432),
+            remote: Endpoint(address: IPAddress("127.0.0.1")!, port: 51_000), pid: 20, processName: "postgres",
+            rxBytes: 100, txBytes: 900, tcpState: .established))
+        engine.ingest([listener, client, server], from: "test", at: 0)
+
+        let controller = GraphController()
+        controller.update(engine.snapshot(), time: 0)
+        let frame = controller.frame(labelBudget: 0)
+        // Host and two processes; two trunks and one line between the processes.
+        #expect(frame.nodes.map(\.kind) == [0, 1, 1])
+        #expect(frame.edges.count == 3)
+        let local = PickTarget.edge(.process(10), .process(20))
+        #expect(controller.flows(for: local).count == 1)
+        #expect(controller.info(for: local)?.title == "node → postgres")
+        #expect(controller.target(pid: 10, remote: Endpoint(address: IPAddress("127.0.0.1")!, port: 5432), proto: .tcp) == local)
+        // The line bows toward the centre rather than cutting straight across.
+        let line = frame.edges[2]
+        #expect(simd_length(line.control) < simd_length((line.p0 + line.p1) * 0.5))
+    }
+
+    @Test func showsAPastMomentAndReturnsToThePresent() {
+        let engine = FlowEngine()
+        let controller = GraphController()
+        engine.ingest([flow(pid: 1, remote: "1.1.1.1", id: 1)], from: "test", at: 0)
+        let earlier = engine.snapshot()
+        controller.update(earlier, time: 0)
+        engine.ingest([flow(pid: 2, remote: "8.8.8.8", id: 2)], from: "test", at: 1)
+        controller.update(engine.snapshot(), time: 1)
+        #expect(controller.frame(labelBudget: 0).nodes.count == 5)
+
+        controller.hold(earlier)
+        #expect(controller.paused)
+        #expect(controller.frame(labelBudget: 0).nodes.count == 3)
+        // The present keeps arriving, unseen, while the past is on screen.
+        engine.ingest([flow(pid: 3, remote: "9.9.9.9", id: 3)], from: "test", at: 2)
+        controller.update(engine.snapshot(), time: 2)
+        #expect(controller.frame(labelBudget: 0).nodes.count == 3)
+        controller.hold(nil)
+        #expect(controller.frame(labelBudget: 0).nodes.count == 7)
+    }
+
+    @Test func lightsEverySelectedItem() {
+        let (controller, _) = simulated()
+        let lit = controller.frame(labelBudget: 0, highlights: [.node(.process(2010)), .node(.process(2144))])
+        #expect(lit.nodes.filter { $0.ring == SIMD4<Float>(1, 1, 1, 1) }.count == 2)
     }
 }

@@ -37,15 +37,49 @@ struct SwitchboardApp: App {
 }
 
 struct SettingsView: View {
+    @AppStorage("clustering") private var clustering = "automatic"
+    @AppStorage("clusterThreshold") private var clusterThreshold = 300
+    @AppStorage("palette") private var palette = "standard"
+    @AppStorage("historyMinutes") private var historyMinutes = 15.0
+    @AppStorage("profile") private var profile = "cinema"
+
     var body: some View {
         Form {
-            LabeledContent("Version", value: Switchboard.version)
-            LabeledContent("Collector socket", value: Switchboard.collectorSocketPath)
-            Text("Settings arrive with the operator console (M3).")
-                .foregroundStyle(.secondary)
+            Section("Display") {
+                Picker("Profile at launch", selection: $profile) {
+                    Text("Cinema").tag("cinema")
+                    Text("Operator").tag("operator")
+                    Text("Still").tag("still")
+                }
+                Picker("Colours", selection: $palette) {
+                    Text("Standard").tag("standard")
+                    Text("Colour-safe").tag("colorSafe")
+                }
+                Text("Colour-safe uses hues that stay distinct with the common colour-vision deficiencies.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section("Graph") {
+                Picker("Group destinations by network", selection: $clustering) {
+                    Text("When there are many").tag("automatic")
+                    Text("Always").tag("subnet")
+                    Text("Never").tag("off")
+                }
+                Stepper("Group once past \(clusterThreshold) destinations", value: $clusterThreshold, in: 50...5000, step: 50)
+                    .disabled(clustering != "automatic")
+            }
+            Section("History") {
+                Stepper("Keep \(Int(historyMinutes)) minutes for the timeline", value: $historyMinutes, in: 1...60, step: 1)
+                Text("History is held in memory only. A very busy machine keeps less than this, to bound memory use.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section("About") {
+                LabeledContent("Version", value: Switchboard.version)
+                LabeledContent("Collector socket", value: Switchboard.collectorSocketPath)
+            }
         }
         .formStyle(.grouped)
-        .frame(width: 420)
-        .padding()
+        .frame(width: 460)
     }
 }

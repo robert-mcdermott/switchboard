@@ -436,7 +436,7 @@ As built in M3: a filter that does not parse is reported and the last good filte
 
 ### 10.5 Time
 
-The app keeps a rolling window (default 1 h) as a ring buffer of deltas with a keyframe every 10 s. The scrubber replays any moment in that window in the graph. Beyond the window, the Log Explorer reconstructs a range from SQLite and hands it to the same replay path.
+The app keeps a rolling window of the recent past: one snapshot of the model per second, 15 minutes by default and up to 60, bounded also by the number of flow records held so a very busy machine keeps less. The scrubber shows any moment in that window in the graph and in every table; pausing is holding the present moment. Beyond the window, the Log Explorer reconstructs a range from SQLite and hands it to the same replay path.
 
 ### 10.6 Workspaces and display
 

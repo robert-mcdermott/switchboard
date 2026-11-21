@@ -35,6 +35,14 @@ struct BottomPanel: View {
                 case .connections: ConnectionsPanel(model: model)
                 case .talkers: TalkersPanel(model: model)
                 case .throughput: ThroughputPanel(model: model)
+                case .mix:
+                    HStack(alignment: .top, spacing: 0) {
+                        RankingList(title: "By service", talkers: model.services, color: .signal)
+                        Rectangle().fill(Color.hairline).frame(width: 1)
+                        RankingList(title: "By remote port", talkers: model.ports, color: .quic)
+                    }
+                case .interfaces:
+                    RankingList(title: "By network interface", talkers: model.interfaces, color: .signal)
                 case .listeners: ListenersPanel(model: model)
                 case .health: HealthPanel(model: model)
                 }
@@ -65,7 +73,7 @@ struct ConnectionsPanel: View {
             .scrollContentBackground(.hidden)
             .onChange(of: selected) {
                 guard let selected, let row = model.rows.first(where: { $0.id == selected }) else { return }
-                model.select(row.target)
+                model.select(row: row)
             }
             if model.totalMatching > model.rows.count {
                 Text("Showing the busiest \(model.rows.count) of \(model.totalMatching). Narrow the filter to see the rest.")
@@ -143,13 +151,20 @@ struct TalkersPanel: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
-            ranking("By process", model.talkers, color: .signal)
+            RankingList(title: "By process", talkers: model.talkers, color: .signal)
             Rectangle().fill(Color.hairline).frame(width: 1)
-            ranking("By destination", model.destinations, color: .quic)
+            RankingList(title: "By destination", talkers: model.destinations, color: .quic)
         }
     }
+}
 
-    private func ranking(_ title: String, _ talkers: [Talker], color: Color) -> some View {
+/// A ranked list with a bar per entry: rate, total, and connection count.
+struct RankingList: View {
+    let title: String
+    let talkers: [Talker]
+    let color: Color
+
+    var body: some View {
         let top = max(talkers.map(\.rate).max() ?? 0, 1)
         return VStack(alignment: .leading, spacing: 8) {
             SectionTitle(title)
@@ -254,6 +269,25 @@ struct HealthPanel: View {
                             .foregroundStyle(Color.dim)
                         Text("Around one in twenty of your own connections is also withheld by macOS from unprivileged tools. The cause is not yet known.")
                             .foregroundStyle(Color.dim)
+                    }
+                }
+                if !model.simulated, getuid() != 0 {
+                    VStack(alignment: .leading, spacing: 4) {
+                        SectionTitle("What is not shown")
+                        HStack(spacing: 10) {
+                            Button(model.scanning ? "Scanning…" : "Scan all accounts once") { model.scanAllUsers() }
+                                .disabled(model.scanning)
+                            Text("Takes about three seconds and uses a full CPU core while it runs.")
+                                .foregroundStyle(Color.dim)
+                        }
+                        if let scan = model.scan {
+                            Text("\(scan.sockets) sockets belonging to other accounts were open at \(scan.taken.formatted(date: .omitted, time: .standard)):")
+                                .foregroundStyle(Color.readout)
+                            ForEach(scan.processes) { process in
+                                Text("  \(process.name) — \(process.connections) sockets, \(ByteFormat.bytes(process.bytes))")
+                                    .foregroundStyle(Color.dim)
+                            }
+                        }
                     }
                 }
                 VStack(alignment: .leading, spacing: 4) {

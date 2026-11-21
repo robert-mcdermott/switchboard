@@ -136,7 +136,7 @@ M4 and M5 are independent of each other and can proceed in parallel once M3 clos
 
 **Exit:** usable all day on the dev Mac in Standalone mode; five-second test passed three times out of three.
 
-**Status: part one built.** The filter language, window layout, inspector, Connections table, four panels, focus mode, and context menu are done and tested (68 tests). The timeline scrubber, clustering, multi-select, filter completion, two panels, settings, palette validation, and the carried items remain for part two, and nothing has yet been driven by hand. Details in [spikes/M3-findings.md](spikes/M3-findings.md).
+**Status: built; the two exit criteria need a person.** Every item above is done except the VoiceOver pass and the five-second test, with three reductions: clustering is by network only, multi-select is ⌘-click without a lasso, and filter completion covers field names but not values. 82 tests pass. Frame pacing improved but the 60 fps floor is not yet held with the console open. Nothing has been driven by hand. Details in [spikes/M3-findings.md](spikes/M3-findings.md).
 
 ---
 
@@ -243,6 +243,7 @@ M4 and M5 are independent of each other and can proceed in parallel once M3 clos
 
 **Build and verify**
 - Full §11 budget pass with `sbctl bench`; fix whatever misses.
+- Draw the graph on its own thread, so the rest of the window cannot delay a frame (carried from M3).
 - 72-hour soak: memory, log growth, reconnect behaviour.
 - Coexistence runs: VPN, a packet-filter firewall, Docker.
 - Contract fixtures recorded on every macOS version available; behaviour on unsupported layouts confirmed to degrade, not crash.
