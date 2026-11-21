@@ -13,9 +13,9 @@ Hardening: making Switchboard trustworthy to leave running. Measured on macOS 27
 | Frame rate, typical | 120 fps on ProMotion | Cinema 120 fps, slowest 1% 9.2 ms, worst 17 ms, panels open | Yes |
 | Engine CPU, idle | < 1% | 0.11% of a core, live | Yes |
 | Engine CPU, 2,000 sockets | < 3% | 0.28% at 1,810 simulated flows | Yes |
-| App CPU, Operator, typical | < 10% | 12–14% | **No** |
+| App CPU, Operator, typical | < 10% | 12–17%, varying with live traffic | **No** |
 | Collector memory | < 60 MB | 10–11 MB, flat over 74 minutes | Yes |
-| App memory, 1 h window | < 400 MB | SOAK_MEMORY | SOAK_MET |
+| App memory, 1 h window | < 400 MB | 279 MB footprint after five minutes; the one-hour figure is from the soak below | See the soak |
 | Network impact, Off and Passive | Zero | The running app holds no internet sockets at all (`lsof -i` on its process) | Yes, by inspection; no packet capture taken |
 
 ## What changed
@@ -35,13 +35,13 @@ The graph was drawn by `MTKView` on the main thread, so every SwiftUI layout pas
 - **Location databases** were read into memory: 137 MB for DB-IP City and ASN Lite. They are now mapped from disk, and only the pages lookups touch are ever resident.
 - **History** kept a full snapshot every second. Older than five minutes it now keeps one every five seconds, which is still fine enough to scrub through, and snapshots share one copy of the process list while it is unchanged.
 
-### CPU in Operator: 26% to 12–14%
+### CPU in Operator: 26% to 12–17%
 
 - **The menu bar menu** read the live status line in the app's scene. Every change rebuilt the scene and made AppKit redraw the menu bar item: half the main thread's work. The menu now reads its figures in a view of its own, refreshed every five seconds.
 - **Operator draws at 60 fps** and Still at 30; Cinema keeps 120. At these speeds the pulses look the same.
 - **Tables are rebuilt once a second**, and the readouts that change every tick (totals, frame rate, the timeline's range) update once a second, in views of their own, so the controls around them are not rebuilt.
 
-What is left of the 12–14%: about 6% is the main thread (SwiftUI and Core Animation committing the window's updates), 3% the render thread, 2% the feed, and the rest small. Getting under 10% will take a closer look at what SwiftUI rebuilds each second.
+What is left of the 12–17%: about 6% is the main thread (SwiftUI and Core Animation committing the window's updates), 3% the render thread, 2% the feed, and the rest small. Getting under 10% will take a closer look at what SwiftUI rebuilds each second.
 
 ### The layout step at thousands of nodes
 
@@ -68,11 +68,11 @@ The step that pushes overlapping nodes apart bucketed them into a dictionary of 
 
 No memory grew without bound over that time.
 
-**After** (current build, Cinema, panels open, a full hour of timeline): SOAK_AFTER
+**After** (current build, Cinema, panels open, a full hour of timeline): a four-hour run was in progress when this was written; its results are added below when it finishes.
 
 ### The log grows faster than expected on this Mac
 
-The log grew about 57 MB an hour. The soak's log held 218,566 connections after 74 minutes, and 86% of them lasted under a second: podman and the `moor` pager connecting to ports on this Mac many times a second. Retention (30 days or 2 GB by default) bounds it, but on this Mac the size limit would be reached in under two days. A setting to leave connections within this Mac out of the log would remove most of it; that is a decision for the owner, so it is not built.
+The log grew about 57 MB an hour. The soak's log held 218,566 connections after 74 minutes, and 86% of them lasted under a second: podman and the `moor` pager connecting to ports on this Mac many times a second. Retention (30 days or 2 GB by default) bounds it, but on this Mac the size limit would be reached in under two days. 72% of the logged connections never left this Mac (156,713 of 220,089). Settings ▸ Log ▸ *Leave out connections within this Mac* now keeps them out of the log; they still show live. It is **off by default**, so nothing changes unless you choose it. Whether it should be on by default is your call.
 
 ## Other M8 items
 
@@ -88,7 +88,7 @@ The log grew about 57 MB an hour. The soak's log held 218,566 connections after 
 
 ## Not done, not verified
 
-- App CPU in Operator is 12–14%, over the 10% budget.
+- App CPU in Operator is 12–17%, over the 10% budget.
 - Cinema at 5,000 nodes does not hold a 60 fps floor; the GPU is the limit at this window size.
 - Event-to-screen and hover-to-tooltip latencies were not timed.
 - No 72-hour soak, and no eight-hour unattended run on a second display (the M7 exit criterion).

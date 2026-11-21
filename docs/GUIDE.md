@@ -125,7 +125,7 @@ Note that a destination with no known country matches `country!=US`. Write `clas
 
 ## The log
 
-Every connection is written to a SQLite file at `~/Library/Application Support/Switchboard/log.sqlite`. The Log panel searches it with the same filter; drag its slider to show a past moment in the graph. Settings ▸ Log sets how much detail is kept and for how long; the Log panel can erase it. From the command line:
+Every connection is written to a SQLite file at `~/Library/Application Support/Switchboard/log.sqlite`. The Log panel searches it with the same filter; drag its slider to show a past moment in the graph. Settings ▸ Log sets how much detail is kept and for how long, and can leave out connections from this Mac to itself, which development tools and containers can open hundreds of a minute; the Log panel can erase it. From the command line:
 
 ```bash
 sbctl log query "process:Safari bytes>1MB" --since 7d
