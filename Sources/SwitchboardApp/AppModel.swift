@@ -194,6 +194,8 @@ final class AppModel {
     let measurePath: String?
     /// Extra seconds to wait before measuring.
     let measureSettle: Double
+    /// Minutes of timeline to keep, for this run only, overriding Settings.
+    let historyOverride: Double?
 
     var summary = LiveFeed.Summary()
     var frames = FrameStats.Summary()
@@ -319,6 +321,7 @@ final class AppModel {
         sourceSpec = value("--source") ?? "nstat"
         measurePath = value("--measure")
         measureSettle = value("--settle").flatMap(Double.init) ?? 0
+        historyOverride = value("--history-minutes").flatMap(Double.init)
 
         // Respect the system setting: no motion unless the user has said otherwise.
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
@@ -480,7 +483,7 @@ final class AppModel {
         // Only "active" makes Switchboard send anything itself: reverse lookups through the system resolver.
         feed?.setActiveLookups(hostnames == "active")
         loadEnrichment()
-        let minutes = defaults.object(forKey: "historyMinutes") as? Double ?? 15
+        let minutes = historyOverride ?? defaults.object(forKey: "historyMinutes") as? Double ?? 15
         window.maximumAge = max(minutes, 1) * 60
         session.controller.lanesWindow = max(defaults.object(forKey: "lanesMinutes") as? Double ?? 10, 0.5) * 60
         session.controller.home = (defaults.string(forKey: "homeLocation")).flatMap(GeoPoint.init) ?? GeoPoint.guess()
