@@ -2,7 +2,7 @@
 
 A real-time network observatory for macOS. Every connection on the machine, who owns it, where it goes, and how hard it is working — drawn as a living graph that an operator can read at a glance and interrogate in seconds.
 
-**Status:** v0.2 draft, revised after the M0 spikes · **Companions:** [ROADMAP.md](ROADMAP.md) · [M0 findings](spikes/M0-findings.md)
+**Status:** v0.3 draft, revised after M0 and M1 · **Companions:** [ROADMAP.md](ROADMAP.md) · [M0 findings](spikes/M0-findings.md) · [M1 findings](spikes/M1-findings.md)
 
 ---
 
@@ -41,7 +41,7 @@ The research document is the source of requirements. This spec keeps its goals a
 | First run | Collector must be installed as root before anything works | **Standalone mode** works with no privileges and shows the login user's activity; the root collector is an upgrade to **Full mode** | NetworkStatistics reports the user's own sockets, with counters, to an unprivileged process (§3) |
 | Traffic rates | Count every packet through PKTAP/libpcap | **Kernel per-flow byte counters** from NetworkStatistics | Exact, no drops, negligible CPU at any link speed |
 | Packet capture | Primary rate source, `ip or ip6` | **Metadata only**: DNS answers, TLS SNI, SYN/FIN timing, filtered in our own code | Capture stops being a hot path; a capture failure costs hostnames, not the product |
-| nettop | First fallback | **Optional supplement** in Standalone; fallback elsewhere | Parsing another tool's CSV is fragile, but `nettop` is Apple-signed and is the only unprivileged view of other users' flows |
+| nettop | First fallback | **On-demand scan** in Standalone; fallback if NetworkStatistics fails | It is Apple-signed and is the only unprivileged view of other users' flows, but it uses about 1.4 CPU cores while sampling, so it cannot run continuously |
 | IPC encoding | Protobuf or MessagePack | **Hand-written binary codec**, no third-party code | Both ends ship from one package at one version; the root daemon should link nothing it does not have to |
 | Dependencies | GRDB, SwiftProtobuf, an mmdb reader | **GRDB only**, and only in the unprivileged app | Smaller supply chain; the MMDB format is small enough to read ourselves |
 | Build | `xcodebuild` for the app | **SwiftPM only** plus a bundling script | No project file to maintain, and it builds with any recent Swift toolchain. `xcodebuild` works on the dev machine but nothing requires it |
@@ -80,13 +80,11 @@ Checked on the development machine: macOS 27.2.1 (26B131), Apple M4, Swift 6.2 f
 
 ### 3.2 Still open
 
-The M0 spikes answered every question they set out to. What they left for later milestones:
+M1 settled two of M0's leftovers: a flow's start time from NetworkStatistics is its true creation time (on the continuous Mach clock), and flows of 10–100 ms are caught reliably (30 of 30). It also found that `netstat`'s receive counter runs at two to three times the true figure, so the kernel socket list is never used for received bytes. Details in [M1 findings](spikes/M1-findings.md). What remains:
 
 | Question | Why it matters | Settled in |
 |---|---|---|
-| Which sockets does NetworkStatistics omit as root (250 sources against 267 sockets)? | Decides how much the kernel-list cross-check has to carry | M1 |
-| Is `startAbsoluteTime` the socket's creation time? | Would make connection age exact for flows that predate Switchboard | M1 |
-| How reliably are flows of 10–100 ms described? Sub-millisecond loopback flows were only partly caught | The short-flow attribution target | M1 |
+| Why does NetworkStatistics omit 5–8% of sockets that `netstat` and `nettop` both show? | Standalone completeness. The omitted sockets are ordinary long-lived TLS connections of the user's own apps | M2: try the framework's `…WithOptions` and `SetFlags` calls |
 | How often does a browser's TLS ClientHello run past its first segment? | Sets the snap length and whether capture must reassemble two segments | M4 |
 | What does unfiltered PKTAP delivery cost under sustained heavy traffic? | The collector's CPU budget | M4 |
 
@@ -145,7 +143,7 @@ Every source that leans on a private layout sits behind an adapter with a record
 | | **Standalone** | **Full** |
 |---|---|---|
 | Privilege | None | `switchboardd` as root |
-| Inventory and rates | The login user's processes | All processes, all users |
+| Inventory and rates | The login user's processes, about 93–95% of their sockets (§3.2) | All processes, all users |
 | Process detail | Full for own processes; path, name, and trust for all | Full for all |
 | Hostnames | Reverse DNS only | Passive DNS and SNI from capture |
 | Short-lived flows | Most; sub-millisecond flows can be missed | Yes, with capture |
@@ -180,11 +178,11 @@ Hard rule: **nothing that runs as root links third-party code.**
 
 | Source | Privilege | Role | Cadence | Stability |
 |---|---|---|---|---|
-| **NStat** (NetworkStatistics) | none for the login user's flows; root for nearly all | Backbone: flow open/close events, 5-tuple, PID, counters, RTT, retransmits, interface, start time | Event-driven; counters polled at 4 Hz (1–10 Hz configurable) | Private framework, loaded with `dlopen` |
-| **KernelSocketList** (`pcblist_n` sysctl) | root | Complete inventory in the collector: cross-check and safety net behind NStat | 1 Hz | Private struct layout, parser verified |
+| **NStat** (NetworkStatistics) | none for the login user's flows; root for nearly all | Backbone: flow open/close events, 5-tuple, PID, counters, RTT, retransmits, interface, start time | Event-driven; counters refreshed at 1 Hz (up to 4 Hz configurable), since asking is the cost | Private framework, loaded with `dlopen` |
+| **KernelSocketList** (`pcblist_n` sysctl) | root | Complete inventory in the collector: cross-check for which sockets exist, never for received bytes, which it over-reports | 1 Hz | Private struct layout, parser verified |
 | **LibProc** | none for own user; root for all | Authoritative fd ownership, process path, parent, UID, start time | On first sight, then cached | Public API |
 | **PktapCapture** (libpcap) | root | DNS answers, TLS SNI, SYN/FIN timestamps, PID for short flows | Continuous | Private header layout |
-| **Nettop** (subprocess CSV) | none | Optional view of other users' flows in Standalone; fallback counters if NStat fails | 1 Hz | CLI output format |
+| **Nettop** (subprocess CSV) | none | On-demand scan of every user's flows in Standalone; fallback if NStat fails. Too costly to run continuously | 1 Hz while running | CLI output format |
 | **Interfaces** (`getifaddrs`, `NET_RT_IFLIST2`) | none | Interface list, type, totals | 1 Hz | Public API |
 | **Simulator** | none | Synthetic traffic for development, demos, benchmarks | Any | Ours |
 | **TraceReplay** | none | Replays a recorded delta stream deterministically | Recorded | Ours |
@@ -208,7 +206,7 @@ Counters are cumulative. For each sample, `rate = Δbytes / Δt` using the monot
 | Situation | Method | Shown as |
 |---|---|---|
 | Opened while Switchboard was watching | First sighting, or SYN timestamp in Full mode | `2h 14m` |
-| Already open at startup | The flow's own start time from NetworkStatistics, if M1 confirms it means what it appears to | `2h 14m` |
+| Already open at startup | The flow's own start time from NetworkStatistics, verified exact in M1 | `2h 14m` |
 | Already open at startup, no start time available | Lower bound from engine start, upper bound from process start | `≥ 37m` with an approximate marker |
 
 ### 6.5 Service identification
@@ -446,10 +444,10 @@ Named workspaces save layout, panels, filters, and profile; three ship by defaul
 | Area | Budget |
 |---|---|
 | Launch to live graph | ≤ 2 s |
-| Event to screen | ≤ 1 s; ≤ 300 ms target |
+| Event to screen | Opens and closes ≤ 300 ms; byte counts ≤ 1 s |
 | Hover to tooltip | ≤ 1 frame |
 | Frame rate | 60 fps floor, 120 fps on ProMotion, at 5,000 nodes and 2,000 active edges |
-| Engine CPU | < 1% idle; < 3% with 2,000 sockets at 4 Hz |
+| Engine CPU | < 1% idle (measured 0.85% with ~150 sockets at the 1 Hz default); < 3% with 2,000 sockets |
 | App CPU | < 10% in Operator profile at typical load |
 | Memory | Collector < 60 MB; app < 400 MB with a 1 h window |
 | Network impact | Zero in Off and Passive modes |

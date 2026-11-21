@@ -9,7 +9,7 @@ public enum Switchboard {
     public static let collectorSocketPath = "/var/run/switchboard.sock"
 }
 
-public enum TransportProtocol: String, Sendable, Hashable, CaseIterable {
+public enum TransportProtocol: String, Sendable, Hashable, CaseIterable, Codable {
     case tcp
     case udp
 }

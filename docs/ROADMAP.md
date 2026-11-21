@@ -79,6 +79,8 @@ M4 and M5 are independent of each other and can proceed in parallel once M3 clos
 
 **Exit:** for the login user's processes, `sbctl top` matches `netstat -anv` over a five-minute session; engine under 1% CPU idle on the dev Mac.
 
+**Status: complete, with one criterion partly met.** Attribution is exact to the byte, connection age is exact, short flows are caught, and the engine runs at 0.85% of a core. Inventory coverage against `netstat` is 93–95%, not 100%: NetworkStatistics omits some sockets, for a reason not yet found. Results and the full list of findings are in [spikes/M1-findings.md](spikes/M1-findings.md).
+
 ---
 
 ## M2 — First light
@@ -86,6 +88,7 @@ M4 and M5 are independent of each other and can proceed in parallel once M3 clos
 **Goal:** the hero view, on real data, looking the part.
 
 **Build**
+- Find the sockets NetworkStatistics omits (try its `…WithOptions` and `SetFlags` calls), and raise the counter refresh rate while the window is visible.
 - Metal engine (§9.5): field, edge ribbons, shader-driven particles, SDF nodes, label atlas, bloom and tone map.
 - Barnes–Hut layout on a background thread with radial bias and hash-seeded stable placement.
 - Quadtree picking; hover tooltip with the full detail set from §10.1.

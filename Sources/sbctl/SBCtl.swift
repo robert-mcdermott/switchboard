@@ -7,6 +7,15 @@ enum SBCtl {
         sbctl \(Switchboard.version) — Switchboard diagnostics
 
         usage:
+          sbctl top [--source S] [--once] [--seconds N]    live connections, busiest first
+          sbctl dump [--source S]                          the engine's model as JSON
+          sbctl record <file> [--source S] [--seconds N]   save source events to a trace
+          sbctl bench [--flows N] | --live                 engine cost, simulated or on this machine
+          sbctl verify                                     check the live engine against netstat and known traffic
+
+          sources: nstat (default), nettop, nstat+nettop, sim:<scenario>, trace:<file>
+          scenarios: quiet, developer, stress, beacon, portscan
+
           sbctl probe sockets [--list] [--verify]   kernel socket list (empty unless root)
           sbctl probe processes                     process identity coverage (no privileges)
           sbctl probe nstat                         NetworkStatistics framework (no privileges)
@@ -16,6 +25,20 @@ enum SBCtl {
         """
 
     static func run(_ arguments: [String]) -> Int32 {
+        let options = Options(arguments: Array(arguments.dropFirst()))
+        do {
+            switch arguments.first {
+            case "top": return try TopCommand.run(options)
+            case "dump": return try DumpCommand.run(options)
+            case "record": return try RecordCommand.run(options)
+            case "bench": return try BenchCommand.run(options)
+            case "verify": return try VerifyCommand.run(options)
+            default: break
+            }
+        } catch {
+            print("error: \(error)")
+            return 1
+        }
         switch arguments.first {
         case "probe":
             let rest = Array(arguments.dropFirst(2))

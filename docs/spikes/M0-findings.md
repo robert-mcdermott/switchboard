@@ -50,7 +50,7 @@ tcp state: 213 of 213 identical
 | A 20-line C program | ad hoc | **48** (header and trailer only) |
 | `sbctl` | ad hoc | **48** |
 
-The size query still reports the full size to everyone; only the contents are withheld. Buffer size makes no difference. The recorded buffers above were captured through the Apple-signed Python and then parsed by `sbctl`.
+The size query still reports the full size to everyone; only the contents are withheld. Buffer size makes no difference. M1 later found the restriction also follows the launching process: `netstat` itself prints no internet sockets when `sbctl` starts it ([M1 findings](M1-findings.md)). The recorded buffers above were captured through the Apple-signed Python and then parsed by `sbctl`.
 
 **Result: root lifts the restriction.** Run under `sudo`, the live read returned 267 sockets across 109 processes and matched `netstat -anv` on all 267, with 266 byte counters identical (one grew in between) and 210 of 210 TCP states identical.
 
@@ -206,7 +206,7 @@ The owner and short name come from the `kern.proc.pid` sysctl and are available 
 1. **Standalone mode shows the login user's network activity, not the whole machine.** That covers browsers, chat, sync clients, developer tools: what most people mean by "what is my Mac talking to". System daemons need the collector.
 2. **NetworkStatistics replaces the kernel socket list as the primary source**, in both modes. It is event-driven and carries RTT and retransmits, which the socket list never did.
 3. **The kernel socket list becomes the collector's cross-check**, polled at 1 Hz, since root can read it and it is complete.
-4. **`nettop` moves up, not down.** It is Apple-signed and entitled, so a `nettop` subprocess is the one unprivileged way to see other users' flows. It becomes an optional supplement to Standalone rather than a last resort.
+4. **`nettop` moves up, not down.** It is Apple-signed and entitled, so a `nettop` subprocess is the one unprivileged way to see other users' flows. M1 measured it at about 1.4 CPU cores while sampling, so it is an on-demand scan, not a continuous supplement.
 5. **Capture filtering moves into our code**, because the kernel will not filter PKTAP for us.
 6. **Full mode's claim holds.** As root: every socket, every process's detail, per-packet attribution, hostnames from DNS and TLS.
 

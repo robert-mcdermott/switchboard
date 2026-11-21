@@ -80,22 +80,15 @@ enum SocketsProbe {
         }
     }
 
-    private struct Row {
-        var key: String
-        var rx: UInt64
-        var state: String?
-    }
-
     /// Compares our parse with what `netstat -anv` prints a moment later.
     private static func verify(_ sockets: [KernelSocket], netstatOutput: String?) -> Int32 {
-        guard let output = netstatOutput ?? netstat() else {
+        guard let output = netstatOutput ?? NetstatReference.run() else {
             print("verify: could not run netstat")
             return 1
         }
-        var theirs: [String: [Row]] = [:]
-        for line in output.split(separator: "\n") {
-            guard let row = parse(netstatLine: line) else { continue }
-            theirs[row.key, default: []].append(row)
+        var theirs: [String: [NetstatReference.Row]] = [:]
+        for row in NetstatReference.rows(in: output) {
+            theirs["\(row.protoName)|\(row.localPort)|\(row.remotePort)|\(row.pid)", default: []].append(row)
         }
         let theirTotal = theirs.values.reduce(0) { $0 + $1.count }
 
@@ -141,37 +134,4 @@ enum SocketsProbe {
     }
 
     private static func distance(_ a: UInt64, _ b: UInt64) -> UInt64 { a > b ? a - b : b - a }
-
-    private static func netstat() -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/sbin/netstat")
-        process.arguments = ["-anv"]
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-        do { try process.run() } catch { return nil }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        return String(decoding: data, as: UTF8.self)
-    }
-
-    /// One `netstat -anv` socket line. The process name may contain spaces, so the pid is
-    /// located by counting fields from the right.
-    private static func parse(netstatLine line: Substring) -> Row? {
-        guard line.hasPrefix("tcp") || line.hasPrefix("udp") else { return nil }
-        let fields = line.split(separator: " ", omittingEmptySubsequences: true)
-        guard fields.count >= 16 else { return nil }
-        let proto = String(fields[0])
-        guard let pidField = fields[fields.count - 9].split(separator: ":").last, let pid = Int32(pidField) else {
-            return nil
-        }
-        func port(_ field: Substring) -> UInt16 {
-            guard let last = field.split(separator: ".").last else { return 0 }
-            return UInt16(last) ?? 0
-        }
-        let hasState = UInt64(fields[5]) == nil
-        guard let rx = UInt64(fields[hasState ? 6 : 5]) else { return nil }
-        let key = "\(proto)|\(port(fields[3]))|\(port(fields[4]))|\(pid)"
-        return Row(key: key, rx: rx, state: hasState && proto.hasPrefix("tcp") ? String(fields[5]) : nil)
-    }
 }

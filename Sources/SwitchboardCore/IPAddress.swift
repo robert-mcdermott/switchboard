@@ -79,3 +79,35 @@ extension IPAddress: CustomStringConvertible {
         }
     }
 }
+
+extension IPAddress {
+    /// Parses dotted-quad IPv4 or any textual IPv6 form.
+    public init?(_ text: String) {
+        var v4 = in_addr()
+        if inet_pton(AF_INET, text, &v4) == 1 {
+            self.init(networkBytes: withUnsafeBytes(of: v4) { Array($0) })
+            return
+        }
+        var v6 = in6_addr()
+        if inet_pton(AF_INET6, text, &v6) == 1 {
+            self.init(networkBytes: withUnsafeBytes(of: v6) { Array($0) })
+            return
+        }
+        return nil
+    }
+}
+
+extension IPAddress: Codable {
+    public init(from decoder: Decoder) throws {
+        let text = try decoder.singleValueContainer().decode(String.self)
+        guard let address = IPAddress(text) else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "not an IP address: \(text)"))
+        }
+        self = address
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(description)
+    }
+}

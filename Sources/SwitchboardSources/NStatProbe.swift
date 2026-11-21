@@ -77,7 +77,7 @@ public enum NStatProbe {
         lines.append("framework loaded, all 10 symbols resolved")
 
         let collector = Collector()
-        guard let listener = makeListener() else {
+        guard let listener = Loopback.listen() else {
             return (lines + ["could not open a loopback listener for the short-flow test"], false)
         }
         defer { close(listener.fd) }
@@ -146,7 +146,7 @@ public enum NStatProbe {
         // Three loopback connections that each live for well under a millisecond of work.
         var durations: [Double] = []
         for _ in 0..<3 {
-            if let elapsed = shortFlow(listener: listener) { durations.append(elapsed * 1000) }
+            if let elapsed = Loopback.flow(to: listener) { durations.append(elapsed * 1000) }
             Thread.sleep(forTimeInterval: 0.05)
         }
         Thread.sleep(forTimeInterval: 1.0)
@@ -226,66 +226,5 @@ public enum NStatProbe {
             return (address, port)
         }
         return nil
-    }
-
-    private static func loopback(port: UInt16) -> sockaddr_in {
-        var address = sockaddr_in()
-        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-        address.sin_family = sa_family_t(AF_INET)
-        address.sin_port = port.bigEndian
-        address.sin_addr.s_addr = UInt32(0x7f00_0001).bigEndian
-        return address
-    }
-
-    private static func makeListener() -> (fd: Int32, port: UInt16)? {
-        let fd = socket(AF_INET, SOCK_STREAM, 0)
-        guard fd >= 0 else { return nil }
-        var address = loopback(port: 0)
-        let bound = withUnsafePointer(to: &address) {
-            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
-            }
-        }
-        guard bound == 0, listen(fd, 8) == 0 else {
-            close(fd)
-            return nil
-        }
-        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
-        let named = withUnsafeMutablePointer(to: &address) {
-            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(fd, $0, &length) }
-        }
-        guard named == 0 else {
-            close(fd)
-            return nil
-        }
-        return (fd, UInt16(bigEndian: address.sin_port))
-    }
-
-    /// Connects, sends 1 KB, reads it, and closes both ends. Returns the lifetime in seconds.
-    private static func shortFlow(listener: (fd: Int32, port: UInt16)) -> Double? {
-        let start = DispatchTime.now().uptimeNanoseconds
-        let client = socket(AF_INET, SOCK_STREAM, 0)
-        guard client >= 0 else { return nil }
-        var address = loopback(port: listener.port)
-        let connected = withUnsafePointer(to: &address) {
-            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                connect(client, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
-            }
-        }
-        guard connected == 0 else {
-            close(client)
-            return nil
-        }
-        let server = accept(listener.fd, nil, nil)
-        guard server >= 0 else {
-            close(client)
-            return nil
-        }
-        var payload = [UInt8](repeating: 0x5a, count: 1024)
-        _ = write(client, payload, payload.count)
-        _ = read(server, &payload, payload.count)
-        close(client)
-        close(server)
-        return Double(DispatchTime.now().uptimeNanoseconds - start) / 1e9
     }
 }
