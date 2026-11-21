@@ -6,7 +6,7 @@ Companion to [SPEC.md](SPEC.md). Section references (§) point there.
 
 - **Vertical slices.** Every milestone ends with something that runs and can be demonstrated, not a layer waiting for the next layer.
 - **Risk first.** The private-interface questions (§3.2) are answered in M0, before anything is built on them.
-- **The graph early.** Real data on screen by M2. The root collector comes after, because Standalone mode already sees the whole machine.
+- **The graph early.** Real data on screen by M2. The root collector comes after, because Standalone mode already sees everything the login user's own processes do.
 - **Testable without privilege.** The simulator and trace replay land in M1 so every later milestone can be verified headlessly.
 - **Sizes, not dates.** S ≈ a few focused sessions, M ≈ about twice that, L ≈ about twice again. Calendar time depends on who is building.
 
@@ -20,7 +20,7 @@ M4 and M5 are independent of each other and can proceed in parallel once M3 clos
 | | Milestone | Size | Ends with |
 |---|---|---|---|
 | M0 | Foundations and spikes | M | Every §3.2 question answered in writing |
-| M1 | Engine | M | `sbctl top` shows every connection, live, unprivileged |
+| M1 | Engine | M | `sbctl top` shows the user's connections, live, unprivileged |
 | M2 | First light | L | The Constellation graph running on real traffic |
 | M3 | Operator console | L | Passes the five-second test; daily-drivable |
 | M4 | Collector and Full mode | M | Hostnames and short-lived flows via the root daemon |
@@ -55,6 +55,8 @@ M4 and M5 are independent of each other and can proceed in parallel once M3 clos
 
 **Needs from the owner:** S3 requires running a probe under `sudo`.
 
+**Status: complete.** All six spikes have outcomes in [spikes/M0-findings.md](spikes/M0-findings.md), and SPEC §3 and §6.1 reflect them.
+
 ---
 
 ## M1 — Engine
@@ -63,7 +65,8 @@ M4 and M5 are independent of each other and can proceed in parallel once M3 clos
 
 **Build**
 - Core models (§8) and the `FlowSource` protocol.
-- `KernelSocketList` and `LibProc` adapters; `NStat` if S2 succeeded; `Nettop` fallback.
+- `NStat` adapter as the backbone, promoted from the M0 probe; `LibProc` for process detail; `Nettop` as fallback and optional supplement.
+- Settle the NetworkStatistics questions left by M0: what `startAbsoluteTime` means, how reliably flows of 10–100 ms are described, and which sockets it omits compared with the kernel list as root.
 - Correlator, lifecycle state machine, rate engine (§6.2–6.4), listener tracking, port-based service table.
 - `Simulator` source with scenario presets (quiet desktop, busy developer, 5k-flow stress, beacon, port scan).
 - Trace record and replay (`.sbtrace`).
@@ -71,10 +74,10 @@ M4 and M5 are independent of each other and can proceed in parallel once M3 clos
 
 **Verify**
 - Unit tests for rates (irregular intervals, counter reset), lifecycle transitions, key reuse.
-- Contract tests on recorded kernel-list buffers.
+- Contract tests on recorded NetworkStatistics descriptions and on synthetic kernel-list buffers.
 - Integration: start `curl`, `nc`, and `iperf3` flows from a script; assert each appears under the right PID with totals within 1% of `netstat`.
 
-**Exit:** `sbctl top` matches `netstat -anv` for a five-minute session; engine under 1% CPU idle on the dev Mac.
+**Exit:** for the login user's processes, `sbctl top` matches `netstat -anv` over a five-minute session; engine under 1% CPU idle on the dev Mac.
 
 ---
 
@@ -137,7 +140,7 @@ M4 and M5 are independent of each other and can proceed in parallel once M3 clos
 - `switchboardd`: engine host, socket publisher, peer checks, backpressure (§7).
 - Wire codec with round-trip and fuzz tests; `sbctl tap --json`.
 - App-side socket client, automatic Standalone ⇄ Full switching, reconnect.
-- `PktapCapture`: narrow BPF filter, DNS answer parser, TLS ClientHello SNI parser, SYN/FIN timing, PID attribution for short flows.
+- `PktapCapture`: filtering in our own code (the kernel will not filter PKTAP), `KernelSocketList` as the collector's cross-check, DNS answer parser, TLS ClientHello SNI parser, SYN/FIN timing, PID attribution for short flows.
 - Hostname modes Off and Passive; source badges; DNS Activity panel.
 - Observed service labels (`TLS`, `QUIC`, `DNS`).
 - `scripts/install.sh` and `uninstall.sh`; the in-app "copy install command" sheet.
@@ -146,6 +149,7 @@ M4 and M5 are independent of each other and can proceed in parallel once M3 clos
 **Verify**
 - Parser tests on captured fixtures, including truncated and malformed packets.
 - Codec fuzzing: no crash, no unbounded allocation.
+- Collector CPU with unfiltered PKTAP delivery under sustained `iperf3` load, and ClientHello sizes from real browser traffic, before the snap length is fixed.
 - A burst of 500 connections each under 100 ms: at least 99% attributed.
 - Kill the daemon mid-session: app falls back to Standalone within two seconds and returns to Full when it restarts.
 - Non-admin user is refused by the socket.

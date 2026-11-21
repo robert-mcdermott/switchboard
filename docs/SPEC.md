@@ -2,7 +2,7 @@
 
 A real-time network observatory for macOS. Every connection on the machine, who owns it, where it goes, and how hard it is working — drawn as a living graph that an operator can read at a glance and interrogate in seconds.
 
-**Status:** v0.1 draft · **Companion:** [ROADMAP.md](ROADMAP.md)
+**Status:** v0.2 draft, revised after the M0 spikes · **Companions:** [ROADMAP.md](ROADMAP.md) · [M0 findings](spikes/M0-findings.md)
 
 ---
 
@@ -38,14 +38,14 @@ The research document is the source of requirements. This spec keeps its goals a
 | Topic | Research draft | This spec | Why |
 |---|---|---|---|
 | Naming | Mixed "Switchboard" / "Meridian" | **Switchboard** everywhere: `switchboardd`, `sbctl`, `/var/run/switchboard.sock` | One name |
-| First run | Collector must be installed as root before anything works | **Standalone mode** works with no privileges; the root collector is an upgrade to **Full mode** | An unprivileged process can already list every socket on the machine with PID and byte counters (§3) |
-| Traffic rates | Count every packet through PKTAP/libpcap | **Kernel per-socket byte counters**, sampled | Exact, no drops, negligible CPU at any link speed |
-| Packet capture | Primary rate source, `ip or ip6` | **Metadata only**: DNS answers, TLS SNI, SYN/FIN timing, behind a narrow BPF filter | Capture stops being a hot path; a capture failure costs hostnames, not the product |
-| nettop | First fallback | **Last-resort** fallback | Parsing another tool's CSV is the most fragile option available |
+| First run | Collector must be installed as root before anything works | **Standalone mode** works with no privileges and shows the login user's activity; the root collector is an upgrade to **Full mode** | NetworkStatistics reports the user's own sockets, with counters, to an unprivileged process (§3) |
+| Traffic rates | Count every packet through PKTAP/libpcap | **Kernel per-flow byte counters** from NetworkStatistics | Exact, no drops, negligible CPU at any link speed |
+| Packet capture | Primary rate source, `ip or ip6` | **Metadata only**: DNS answers, TLS SNI, SYN/FIN timing, filtered in our own code | Capture stops being a hot path; a capture failure costs hostnames, not the product |
+| nettop | First fallback | **Optional supplement** in Standalone; fallback elsewhere | Parsing another tool's CSV is fragile, but `nettop` is Apple-signed and is the only unprivileged view of other users' flows |
 | IPC encoding | Protobuf or MessagePack | **Hand-written binary codec**, no third-party code | Both ends ship from one package at one version; the root daemon should link nothing it does not have to |
 | Dependencies | GRDB, SwiftProtobuf, an mmdb reader | **GRDB only**, and only in the unprivileged app | Smaller supply chain; the MMDB format is small enough to read ourselves |
-| Build | `xcodebuild` for the app | **SwiftPM only** plus a bundling script | The Xcode on the dev machine is out of step with the OS (§3); the project should not depend on it |
-| Shaders | Unspecified | Metal shader **source compiled at launch** | The offline Metal compiler ships only with full Xcode |
+| Build | `xcodebuild` for the app | **SwiftPM only** plus a bundling script | No project file to maintain, and it builds with any recent Swift toolchain. `xcodebuild` works on the dev machine but nothing requires it |
+| Shaders | Unspecified | Metal shader **source compiled at launch** | Keeps the build to plain `swift build` with no separate shader step; a trivial shader compiled in about 200 ms cold on the dev Mac (§3) |
 | Graph labels | SwiftUI overlay | **Drawn in Metal** from a CoreText-rasterised atlas | Thousands of SwiftUI text views cannot hold 60 fps |
 | Parquet export | v1 | **Dropped** (CSV and JSONL only) | No mature dependency-free Swift writer; DuckDB converts JSONL in one line |
 | Verification | Manual and hallway tests | **Simulated source, trace record/replay, headless frame snapshots** | The graph must be testable without a human or root |
@@ -54,32 +54,41 @@ The research document is the source of requirements. This spec keeps its goals a
 
 ## 3. Ground truth
 
-Checked on the development machine: macOS 27.2.1 (26B131), Apple Silicon, Swift 6.1.
+Checked on the development machine: macOS 27.2.1 (26B131), Apple M4, Swift 6.2 from Xcode 26.0 beta.
 
 ### 3.1 Verified
 
 | Finding | Evidence | Consequence |
 |---|---|---|
-| An unprivileged process can list all TCP/UDP sockets system-wide, each with owning PID, cumulative rx/tx bytes, and TCP state | `netstat -anv` as a normal user returned 258 socket rows across 108 processes: 91 owned by the login user, 13 by root, 4 by system accounts | The kernel socket list is the backbone source and needs no root |
+| The kernel socket list is withheld from unprivileged, ad-hoc-signed processes, and given to root | The `pcblist_n` sysctl returned ~136 KB to Apple-signed callers (`netstat`, `sysctl`, Xcode's Python) and 48 bytes, an empty list, to an ad-hoc-signed C program and to `sbctl`, same user and moment As root, `sbctl` read 267 sockets and matched `netstat` on all of them | It cannot be the Standalone backbone (an earlier draft assumed it could, because `netstat` works unprivileged). It is a complete inventory for the collector |
+| Our kernel socket list parser is exact | Recorded buffers parsed by `sbctl` matched `netstat -anv` on 268 of 268 sockets: PIDs, byte counters, and all 213 TCP states | The declarations in `CDarwinPrivate.h` are right for macOS 27.2; usable wherever the kernel will fill the list |
+| NetworkStatistics works unprivileged and unentitled | Loaded with `dlopen`; 170 sources across 92 processes (91 owned by the login user) against 278 sockets in `netstat`; 52 keys per flow including bytes, packets, RTT, retransmits, TCP state, and start time; open and close delivered as events As root: 250 sources across 116 processes, 99 owned by other accounts, against 267 sockets in the kernel list | It is the primary source in both modes. Unprivileged it covers the login user's processes; as root nearly everything, with the kernel list beside it to catch the remainder |
+| PKTAP delivers process metadata on macOS 27.2 | As root on `pktap,all`: header length 156 on 821 of 821 packets, matching our declaration; PID on 95%; the probe's own DNS lookup appeared as `mDNSResponder for sbctl`; 4 of 4 TLS server names read and attributed; no drops | Capture can tie DNS answers and short flows to the requesting process |
+| PKTAP cannot be filtered in the kernel | `pcap_compile` fails: "Apple DLT_PKTAP link-layer type filtering not implemented" | The collector filters after delivery (§6.7) |
 | libproc socket enumeration works from Swift with `import Darwin` alone | A 30-line probe using `proc_listallpids` → `PROC_PIDLISTFDS` → `PROC_PIDFDSOCKETINFO` compiled and ran | No C shim needed for libproc |
-| libproc without root covers only part of the machine | The same probe found 169 inet sockets against roughly 258 in the kernel list a minute earlier | libproc is the detail source (fd ownership, socket options), not the inventory source, until the collector runs as root |
+| libproc without root covers the login user's processes only | Descriptor lists and `PROC_PIDTBSDINFO` succeeded for 858 of 858 own processes and 0 of 273 others | libproc is a detail source (fd ownership, parent, start time), not an inventory source |
+| Executable paths are readable for every process without root | `proc_pidpath` succeeded for 182 of 182 root processes and 91 of 91 owned by other accounts | Icons, bundle names, and code-signature trust work in Standalone mode |
 | `/dev/bpf*` is root-only (`crw------- root wheel`) | `ls -l /dev/bpf0` | Packet capture requires the collector |
 | libpcap exports `pcap_set_want_pktap` and `pcap_set_pktap_hdr_v`, but the SDK headers declare neither | Symbols present in `libpcap.A.tbd`; no `pktap` match under `usr/include/pcap` | We declare these ourselves in a small C target |
 | `net/pktap.h` is not in the SDK | File absent | The PKTAP header layout must be re-declared from published XNU source and guarded at runtime |
 | nettop still emits per-flow CSV unprivileged | `nettop -L 1 -x -n` returned columns `interface,state,bytes_in,bytes_out,rx_dupe,rx_ooo,re-tx,rtt_avg,…` | Viable fallback; also confirms RTT and retransmit counts exist in the kernel statistics path |
-| `NetworkStatistics.framework` (the private framework behind nettop) is present on disk and in the SDK | Directory listing | Candidate event-driven source (§3.2) |
-| Xcode and the OS are out of step | `xcode-select` points at Xcode 16.3 (SDK 15.4); `xcrun --show-sdk-path` resolves to the Command Line Tools SDK 27.2; `xcodebuild` fails to locate an SDK | Do not depend on `xcodebuild`. `swiftc` built the probe without trouble |
+| The toolchain is one release behind the OS but sufficient | Active Xcode is 26.0 beta (Swift 6.2, macOS 26.0 SDK); the Command Line Tools carry the 27.2 SDK. A SwiftPM package built and ran, and a file importing SwiftUI, Charts, and MetalKit compiled against both SDKs | Pin the deployment target in `Package.swift` rather than relying on toolchain defaults |
+| The default SDK lookup is mixed | `xcrun --show-sdk-path` returns the Command Line Tools SDK, which the Xcode 26 linker cannot read: a plain `cc` link fails. `xcrun --sdk macosx` resolves cleanly, and `swift build` is unaffected | Scripts that call the C compiler pass `-isysroot` explicitly |
+| Metal shaders compile from source at runtime, quickly | The prototype's shader file: 51 ms on the first launch of a build, 1 ms afterwards | Runtime compilation stays; re-measure as the shader set grows |
+| The render approach has headroom | Instanced Bézier ribbons with shader-computed pulses: 118 fps at 1,000 edges and 119 fps at 5,000, in a 5120 × 2756 window on a 120 Hz display; 85 fps at 20,000 | The §9.5 pipeline design stands |
+| A SwiftPM executable in a hand-assembled bundle is a first-class app | Main window, menu bar extra, and Settings scene all present; strict signature verification passes | No Xcode project. SwiftPM's `Bundle.module` looks in the wrong place inside an app, so resources are located by our own lookup |
 
-### 3.2 Not yet verified — settled by the M0 spikes
+### 3.2 Still open
 
-| Question | Why it matters | If the answer is no |
+The M0 spikes answered every question they set out to. What they left for later milestones:
+
+| Question | Why it matters | Settled in |
 |---|---|---|
-| Can we read `net.inet.{tcp,udp}.pcblist_n` directly and parse its records reliably? | It is what `netstat` reads, but the record structs are private and may shift between releases | Fall back to NetworkStatistics, then nettop |
-| Is `NetworkStatistics.framework` usable without entitlements, as user and as root? | It delivers flow open/close as events, so short-lived connections are caught without capture, and it carries RTT and retransmits | Short flows are seen only in Full mode, via capture |
-| Does PKTAP still deliver PID and effective PID per packet on macOS 27? | Attributes DNS answers and short flows to a process | Match captured packets to sockets by 5-tuple instead |
-| Does a SwiftPM-built executable inside a hand-assembled `.app` behave as a first-class app (menu bar extra, Settings scene, resource bundle lookup)? | Decides whether the build stays Xcode-free | Generate an Xcode project as a build artifact, never checked in |
-| Does runtime Metal shader compilation cost under ~200 ms at launch? | Launch-to-graph budget | Cache the compiled library on disk |
-| Does unprivileged `proc_pidpath` return paths for other users' processes? | Process identity and icons in Standalone mode | Show name and PID only; flag as restricted |
+| Which sockets does NetworkStatistics omit as root (250 sources against 267 sockets)? | Decides how much the kernel-list cross-check has to carry | M1 |
+| Is `startAbsoluteTime` the socket's creation time? | Would make connection age exact for flows that predate Switchboard | M1 |
+| How reliably are flows of 10–100 ms described? Sub-millisecond loopback flows were only partly caught | The short-flow attribution target | M1 |
+| How often does a browser's TLS ClientHello run past its first segment? | Sets the snap length and whether capture must reassemble two segments | M4 |
+| What does unfiltered PKTAP delivery cost under sustained heavy traffic? | The collector's CPU budget | M4 |
 
 Every source that leans on a private layout sits behind an adapter with a recorded-fixture contract test, so a macOS update that breaks one fails loudly in tests and degrades gracefully at runtime.
 
@@ -136,13 +145,13 @@ Every source that leans on a private layout sits behind an adapter with a record
 | | **Standalone** | **Full** |
 |---|---|---|
 | Privilege | None | `switchboardd` as root |
-| Inventory and rates | All sockets, all users | Same |
-| Process detail | Own-user processes fully; others by name and PID | All processes |
+| Inventory and rates | The login user's processes | All processes, all users |
+| Process detail | Full for own processes; path, name, and trust for all | Full for all |
 | Hostnames | Reverse DNS only | Passive DNS and SNI from capture |
-| Short-lived flows | Only if the event-driven source works | Yes |
+| Short-lived flows | Most; sub-millisecond flows can be missed | Yes, with capture |
 | Setup | Launch the app | One install command |
 
-The app starts in Standalone, looks for the collector socket, and switches to Full when it appears. The Health panel always states the current mode and what each source is contributing.
+The app starts in Standalone, looks for the collector socket, and switches to Full when it appears. The Health panel always states the current mode and what each source is contributing, and in Standalone it says plainly that system daemons and other users' processes are not shown.
 
 `FlowEngine` is one library. In Standalone the app hosts it in-process; in Full the daemon hosts it and the app consumes its deltas over a socket. Everything above `FlowFeed` is identical in both.
 
@@ -171,11 +180,11 @@ Hard rule: **nothing that runs as root links third-party code.**
 
 | Source | Privilege | Role | Cadence | Stability |
 |---|---|---|---|---|
-| **KernelSocketList** (`pcblist_n` sysctl) | none | Inventory backbone: 5-tuple, state, PID, cumulative bytes | 4 Hz (1–10 Hz configurable) | Private struct layout |
-| **NStat** (NetworkStatistics) | to verify | Flow open/close events, RTT, retransmits, per-flow interface | Event-driven | Private framework |
+| **NStat** (NetworkStatistics) | none for the login user's flows; root for nearly all | Backbone: flow open/close events, 5-tuple, PID, counters, RTT, retransmits, interface, start time | Event-driven; counters polled at 4 Hz (1–10 Hz configurable) | Private framework, loaded with `dlopen` |
+| **KernelSocketList** (`pcblist_n` sysctl) | root | Complete inventory in the collector: cross-check and safety net behind NStat | 1 Hz | Private struct layout, parser verified |
 | **LibProc** | none for own user; root for all | Authoritative fd ownership, process path, parent, UID, start time | On first sight, then cached | Public API |
 | **PktapCapture** (libpcap) | root | DNS answers, TLS SNI, SYN/FIN timestamps, PID for short flows | Continuous | Private header layout |
-| **Nettop** (subprocess CSV) | none | Fallback counters when the kernel list parser fails | 1 Hz | CLI output format |
+| **Nettop** (subprocess CSV) | none | Optional view of other users' flows in Standalone; fallback counters if NStat fails | 1 Hz | CLI output format |
 | **Interfaces** (`getifaddrs`, `NET_RT_IFLIST2`) | none | Interface list, type, totals | 1 Hz | Public API |
 | **Simulator** | none | Synthetic traffic for development, demos, benchmarks | Any | Ours |
 | **TraceReplay** | none | Replays a recorded delta stream deterministically | Recorded | Ours |
@@ -185,10 +194,10 @@ All conform to one `FlowSource` protocol and report a capability set and a healt
 ### 6.2 Correlation
 
 - **Flow key:** `(protocol, local address, local port, remote address, remote port)`. A flow is owned by one PID; sockets shared across `fork` are attributed to the lowest live PID holding the fd, and the others are listed in the inspector.
-- **Attribution priority:** LibProc fd owner → kernel list PID → NStat PID → PKTAP PID. The winning source is recorded on the flow.
-- **Lifecycle:** `new → active → idle → closing → closed`. `idle` after 5 s without bytes. `closed` when the socket leaves the kernel list or a FIN/RST is observed. Closed flows stay in the model for a fade window (default 30 s), then leave the live view and remain in the log.
+- **Attribution priority:** LibProc fd owner → NStat PID → kernel list PID → PKTAP PID. The winning source is recorded on the flow.
+- **Lifecycle:** `new → active → idle → closing → closed`. `idle` after 5 s without bytes. `closed` when the source reports the flow removed or a FIN/RST is observed. Closed flows stay in the model for a fade window (default 30 s), then leave the live view and remain in the log.
 - **Listeners** are tracked separately, never as flows, and marked `exposed` when bound to a non-loopback address.
-- **Unconnected UDP sockets** have no remote endpoint in the kernel list. They appear as a socket with totals; per-destination breakdown needs NStat or capture, and the UI says so rather than inventing an edge.
+- **Unconnected UDP sockets** have no single remote endpoint. They appear as a socket with totals; a per-destination breakdown needs capture, and the UI says so rather than inventing an edge.
 
 ### 6.3 Rates
 
@@ -199,7 +208,8 @@ Counters are cumulative. For each sample, `rate = Δbytes / Δt` using the monot
 | Situation | Method | Shown as |
 |---|---|---|
 | Opened while Switchboard was watching | First sighting, or SYN timestamp in Full mode | `2h 14m` |
-| Already open at startup | Lower bound from engine start, upper bound from process start | `≥ 37m` with an approximate marker |
+| Already open at startup | The flow's own start time from NetworkStatistics, if M1 confirms it means what it appears to | `2h 14m` |
+| Already open at startup, no start time available | Lower bound from engine start, upper bound from process start | `≥ 37m` with an approximate marker |
 
 ### 6.5 Service identification
 
@@ -217,8 +227,8 @@ Standalone mode has no passive source, so its default is Off with a one-click pr
 
 ### 6.7 Capture discipline (Full mode)
 
-- Snap length 256 bytes. Packets are parsed in memory and discarded; nothing is written.
-- The default BPF filter admits only what the parsers need: port 53, TCP SYN/FIN/RST, and the opening segments of TLS flows. Rates never depend on capture.
+- Snap length 256 bytes for everything except TLS handshakes. Current browsers send ClientHellos larger than one segment with shuffled extensions, so the opening segments of a TLS flow are captured whole. The four ClientHellos seen in M0 all fit in one segment, but none came from a browser; M4 measures real browser traffic before the snap length is fixed. Packets are parsed in memory and discarded; nothing is written.
+- PKTAP cannot be filtered in the kernel, so every packet's first bytes reach the collector, which immediately discards all but what the parsers need: port 53, TCP SYN/FIN/RST, and the opening segments of TLS flows. Rates never depend on capture. The cost of this under sustained heavy traffic is measured in M4.
 - Kernel drop counts are surfaced in Health.
 
 ---
@@ -500,8 +510,9 @@ The simulator and trace replay exist so that every view can be developed, demons
 
 | Risk | Effect | Response |
 |---|---|---|
-| Kernel-list struct layout shifts in a macOS update | Lose the backbone source | Runtime sanity checks on record kinds and lengths; NStat then nettop fallback; contract tests per OS |
-| NetworkStatistics unusable without entitlement | No event-driven opens in Standalone | Poll faster; state the short-flow limitation in Health; capture covers it in Full |
+| NetworkStatistics changes or becomes entitlement-gated in a macOS update | Lose the backbone source; Standalone would have nothing but `nettop` | Loaded with `dlopen`, so absence is detected, not fatal; `nettop` subprocess fallback; the collector's other sources in Full mode; a probe (`sbctl probe nstat`) to run on every new macOS |
+| Standalone cannot see system daemons | A user may assume the picture is complete | Stated in Health and on the graph; one-step upgrade to Full mode |
+| Kernel-list struct layout shifts in a macOS update | Lose a collector cross-check | Runtime checks on record kinds and lengths; contract tests per OS |
 | PKTAP header changes | Lose PID on captured packets | Match by 5-tuple; hostnames still work |
 | SwiftPM app bundle misbehaves | Build story gets heavier | Generated Xcode project as a fallback artifact |
 | Encrypted DNS, ECH, Private Relay | Fewer hostnames | PTR mode, ASN and organisation as the fallback identity, clear messaging |
@@ -516,4 +527,4 @@ The simulator and trace replay exist so that every view can be developed, demons
 1. **Licence and visibility.** MIT, Apache-2.0, or GPL; public from the start or private until v1.0. Blocks nothing until the first release.
 2. **Identifier prefix.** Bundle ID and LaunchDaemon label. Placeholder: `local.switchboard`.
 3. **Default profile.** This spec defaults to Cinema. Operator is the safer default for daily use.
-4. **Private framework use.** NetworkStatistics is the best event source available but is private API. The spec assumes it is acceptable behind an adapter; say so if it is not.
+4. **Private framework use.** NetworkStatistics is private API and, after M0, the only way an unprivileged build can see flows with counters. The spec now depends on it. Without it, Switchboard needs the root collector from first launch.
