@@ -16,7 +16,7 @@ Hardening: making Switchboard trustworthy to leave running. Measured on macOS 27
 | App CPU, Operator, typical | < 10% | 12–17%, varying with live traffic | **No** |
 | Collector memory | < 60 MB | 10–11 MB, flat over 74 minutes | Yes |
 | App memory, 1 h window | < 400 MB | 279 MB footprint after five minutes; the one-hour figure is from the soak below | See the soak |
-| Network impact, Off and Passive | Zero | The running app holds no internet sockets at all (`lsof -i` on its process) | Yes, by inspection; no packet capture taken |
+| Network impact, Off and Passive | Zero | The running app holds no internet sockets at all: `lsof` on its process shows one Unix socket (to the collector) and no others among its 68 open files | Yes, by inspection; no packet capture taken |
 
 ## What changed
 
@@ -41,7 +41,7 @@ The graph was drawn by `MTKView` on the main thread, so every SwiftUI layout pas
 - **Operator draws at 60 fps** and Still at 30; Cinema keeps 120. At these speeds the pulses look the same.
 - **Tables are rebuilt once a second**, and the readouts that change every tick (totals, frame rate, the timeline's range) update once a second, in views of their own, so the controls around them are not rebuilt.
 
-What is left of the 12–17%: about 6% is the main thread (SwiftUI and Core Animation committing the window's updates), 3% the render thread, 2% the feed, and the rest small. Getting under 10% will take a closer look at what SwiftUI rebuilds each second.
+What is left of the 12–17%: about 6–7% is the main thread, 3% the render thread, 2–3% the feed, and the rest small. Two-thirds of the main thread's share is the Connections table: AppKit animates rows in and out as short-lived connections come and go, and measures each new row's height. Turning off SwiftUI's animation for those updates does not stop AppKit's own. A table that keeps a fixed set of rows and changes their contents, or an AppKit table driven directly, is the likely way under 10%.
 
 ### The layout step at thousands of nodes
 
@@ -81,7 +81,7 @@ The log grew about 57 MB an hour. The soak's log held 218,566 connections after 
 | About pane listing what is collected and stored | Done: **Switchboard ▸ About Switchboard: What It Collects** |
 | README, guide, troubleshooting, what Standalone cannot see | Done: [README](../../README.md), [GUIDE](../GUIDE.md) |
 | Release script: unsigned zip, checksums, quarantine instructions | Done: `scripts/release.sh`; built and checked locally, nothing published |
-| Accessibility | The graph has a VoiceOver label and a summary that updates each second; every icon-only control has a name. **Not tried with VoiceOver**, and full keyboard navigation has not been checked |
+| Accessibility | The graph has a VoiceOver label and a summary that updates each second ("Constellation layout. 71 connections, receiving 3.4 KB/s, sending 23.2 KB/s. Busiest: …"), read back from the running view by `--measure`; every icon-only control has a name. **Not heard through VoiceOver**, and full keyboard navigation has not been checked |
 | 72-hour soak | Not run; see above for what was |
 | Coexistence: VPN, packet filter, Docker | This Mac runs GlobalProtect, Tailscale, CrowdStrike Falcon, and podman, and every measurement here was taken with them running. No packet-filter firewall run, and nothing was switched on and off to compare |
 | Contract fixtures on every available macOS | One macOS version was available |
