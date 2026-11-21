@@ -355,11 +355,12 @@ struct TopBar: View {
                 Image(systemName: "chart.bar.doc.horizontal").accessibilityLabel("Lanes").tag(GraphLayout.lanes).help("Lanes: each connection over time (3)")
                 Image(systemName: "globe").accessibilityLabel("Globe").tag(GraphLayout.globe).help("Globe: where destinations are (4)")
                 Image(systemName: "list.bullet.indent").accessibilityLabel("Hierarchy").tag(GraphLayout.hierarchy).help("Hierarchy: account, process, domain, address (5)")
+                Image(systemName: "cube.transparent").accessibilityLabel("Cyberspace").tag(GraphLayout.cyberspace).help("Cyberspace: the address space as a floor, flown through (6)")
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(width: 180)
-            .help("How the connections are arranged: constellation (1), flow (2), lanes (3), globe (4), hierarchy (5)")
+            .frame(width: 215)
+            .help("How the connections are arranged: constellation (1), flow (2), lanes (3), globe (4), hierarchy (5), cyberspace (6)")
 
             Picker("Profile", selection: Binding(get: { model.profile }, set: { model.setProfile($0) })) {
                 ForEach(RenderProfile.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }

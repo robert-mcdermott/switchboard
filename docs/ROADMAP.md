@@ -271,7 +271,7 @@ M4 and M5 are independent of each other and can proceed in parallel once M3 clos
 - **Traffic within this Mac:** a switch (**L**) that shows everything or only traffic that leaves this Mac, in the graph, tables, log search, and exports.
 - **An app icon**, drawn in code by `scripts/make-icon.swift`.
 - **Colour themes:** Standard, Neon, Phosphor, Amber, Ice, Colour-safe; **T** cycles them.
-- **Proposed, not started:** a 3D "cyberspace" layout that can be flown through.
+- **A sixth layout, Cyberspace (6):** the address space as a floor in 3D on a Hilbert curve, a tower on each destination's address, beams from the processes above, flown through with the mouse and W A S D.
 
 ---
 

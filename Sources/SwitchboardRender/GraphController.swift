@@ -28,6 +28,9 @@ public enum GraphLayout: String, Sendable, CaseIterable {
     case globe
     /// Account, process, domain, address, as a tree.
     case hierarchy
+    /// The address space as a floor in three dimensions, a tower on each destination's
+    /// address, beams from this Mac's processes above. Flown through.
+    case cyberspace
 }
 
 public enum GroupKind: String, Hashable, Sendable {
@@ -119,6 +122,11 @@ public struct RenderFrame: Sendable {
     public var halfSize = SIMD2<Float>(600, 600)
     /// The colour theme, for what the renderer colours itself: labels, background, grid.
     public var palette = PaletteScheme.standard
+    /// Whether the flat graph paper is drawn behind everything. The cyberspace layout
+    /// draws its own floor in perspective instead.
+    public var flatGrid = true
+    /// A share of the profile's bloom, for a scene so dense that full bloom would turn it white.
+    public var bloomScale: Float = 1
 }
 
 /// Holds the graph: turns engine snapshots into nodes and edges, lays them out, and
@@ -147,6 +155,10 @@ public final class GraphController: @unchecked Sendable {
         var globe: SIMD3<Float>?
         /// 1 in full view, 0 behind the globe.
         var visibility: Float = 1
+        /// Where in the cyberspace layout's world, which the camera projects each frame.
+        var space: SIMD3<Float>?
+        /// The radius at the camera's reference depth, before perspective.
+        var baseRadius: Float = 0
     }
 
     /// A line that joins no nodes: one connection's lifetime in the lanes layout, or a rule.
@@ -185,6 +197,8 @@ public final class GraphController: @unchecked Sendable {
         var lift: Float = 0
         /// 1 in full view, 0 behind the globe.
         var visibility: Float = 1
+        /// The width at the camera's reference depth, in the cyberspace layout.
+        var baseHalfWidth: Float = 0
 
         func control(_ a: SIMD2<Float>, _ b: SIMD2<Float>) -> SIMD2<Float> {
             if let fixedControl { return fixedControl }
@@ -267,6 +281,20 @@ public final class GraphController: @unchecked Sendable {
     /// How fast the globe is still turning after being let go, in radians a second.
     private var globeSpin = SIMD2<Float>.zero
     private var lastAdvance: Float?
+    /// When the current layout was first drawn, for the layouts that project their nodes
+    /// every frame: once the glide into place is over, nodes keep exactly to the projection.
+    private var projectedSince: Float?
+    /// The scene's share of the profile's bloom.
+    private var layoutBloom: Float = 1
+    /// The cyberspace layout's camera, its floor and towers, and how it is being moved.
+    private var spaceCamera = SpaceCamera()
+    private var spaceLines: [SpaceLine] = []
+    private var spaceTurnedByHand = false
+    private var spaceSpin = SIMD2<Float>.zero
+    /// Keys held to fly: x to the right, z ahead.
+    private var spaceFlight = SIMD3<Float>.zero
+    /// Where a flight to a tower is heading.
+    private var spaceGoal: (target: SIMD3<Float>, distance: Float)?
     /// Where this Mac is, for the globe.
     private var homePoint = GeoPoint.guess() {
         didSet {
@@ -387,6 +415,7 @@ public final class GraphController: @unchecked Sendable {
             change {
                 // What the lanes remembered on their own account goes when they do.
                 if layoutMode == .lanes, newValue != .lanes, !keepEnded { ended.removeAll() }
+                if layoutMode != newValue { projectedSince = nil }
                 layoutMode = newValue
             }
         }
@@ -539,6 +568,7 @@ public final class GraphController: @unchecked Sendable {
         let tagColors = self.tagColors
         let homePoint = self.homePoint
         let globeViewNow = self.globeView
+        let spaceCameraNow = self.spaceCamera
         let novel = self.novel.filter { time - $0.value < Self.novelSeconds }
         var ended = self.ended
         let previous = Dictionary(uniqueKeysWithValues: nodes.map { ($0.id, $0) })
@@ -685,6 +715,8 @@ public final class GraphController: @unchecked Sendable {
         var extraEdges: [EdgeKey: Aggregate] = [:]
         var shownProcesses = byProcess.count
         var globeLinesBuilt: [GlobeLine] = []
+        var spaceLinesBuilt: [SpaceLine] = []
+        var bloomBuilt: Float = 1
         var connectionNodesBuilt: [AddressEdge: NodeID] = [:]
         var filtersBuilt: [NodeID: String] = [:]
         if layoutMode != .constellation {
@@ -692,12 +724,13 @@ public final class GraphController: @unchecked Sendable {
                 byProcess: byProcess, byAddressEdge: byAddressEdge, links: links, nodeFor: nodeFor, processes: processes,
                 listeners: listeners, scheme: scheme, previous: previous, hostLabel: hostLabel, now: snapshot.time,
                 window: lanesSeconds, tagColors: tagColors, remotes: remotes, members: members, groupLabels: groupLabels,
-                home: homePoint, globeView: globeViewNow)
+                home: homePoint, globeView: globeViewNow, spaceCamera: spaceCameraNow, novel: Set(novel.keys))
             let scene: LayoutScene
             switch layoutMode {
             case .flow: scene = Self.flowScene(input, born: born)
             case .lanes: scene = Self.lanesScene(input, born: born)
             case .globe: scene = Self.globeScene(input, born: born)
+            case .cyberspace: scene = Self.cyberspaceScene(input, born: born)
             default: scene = Self.hierarchyScene(input, born: born)
             }
             built = scene.nodes
@@ -710,8 +743,10 @@ public final class GraphController: @unchecked Sendable {
             shownProcesses = scene.processCount
             for (id, addresses) in scene.members { members[id] = addresses }
             for (id, label) in scene.labels { groupLabels[id] = label }
-            if layoutMode == .flow || layoutMode == .globe { nodeFor = scene.nodeFor }
+            if layoutMode == .flow || layoutMode == .globe || layoutMode == .cyberspace { nodeFor = scene.nodeFor }
             globeLinesBuilt = scene.globeLines
+            spaceLinesBuilt = scene.spaceLines
+            bloomBuilt = scene.bloomScale
             connectionNodesBuilt = scene.connectionNodes
             filtersBuilt = scene.filters
             for (offset, node) in built.enumerated() { lookup[node.id] = offset }
@@ -895,9 +930,12 @@ public final class GraphController: @unchecked Sendable {
         self.halfSize = halfSize
         layoutTargetsNodes = layoutMode == .flow || layoutMode == .hierarchy
         globeLines = globeLinesBuilt
+        spaceLines = spaceLinesBuilt
+        layoutBloom = bloomBuilt
         connectionNodes = connectionNodesBuilt
         layoutFilters = filtersBuilt
         if layoutMode == .globe { reprojectGlobe() }
+        if layoutMode == .cyberspace { reprojectSpace() }
         nodesCollide = layoutMode == .constellation
         index = lookup
         extent = farthest + 90
@@ -959,7 +997,12 @@ public final class GraphController: @unchecked Sendable {
         defer { lock.unlock() }
         let step = lastAdvance.map { min(max(time - $0, 0), 0.1) } ?? 0
         lastAdvance = time
+        if layoutMode == .cyberspace {
+            advanceSpace(time: time, step: step, motion: motion)
+            return
+        }
         guard layoutMode == .globe else { return }
+        if projectedSince == nil { projectedSince = time }
         if globeTurnedByHand {
             // Where the person left it, still spinning a little if they let go mid-swipe.
             guard motion, simd_length(globeSpin) > 0.002 else {
@@ -1030,11 +1073,195 @@ public final class GraphController: @unchecked Sendable {
     }
 
     /// Projects every node, arc, and line of the globe for its current turn. Holds `lock`.
+    // MARK: - Cyberspace
+
+    /// Moves the cyberspace camera for one frame: a slow orbit unless someone has taken
+    /// hold, momentum after a flick, flying on held keys, a glide toward a chosen tower.
+    /// Then projects everything. Holds `lock`.
+    private func advanceSpace(time: Float, step: Float, motion: Bool) {
+        if projectedSince == nil { projectedSince = time }
+        if !spaceTurnedByHand, motion {
+            // Once round every five minutes, starting from where the layout was opened.
+            spaceCamera.yaw = SpaceCamera.homeYaw + (time - (projectedSince ?? time)) * 2 * .pi / 300
+        }
+        if simd_length(spaceSpin) > 0.002, motion {
+            spaceCamera.orbit(by: spaceSpin * step)
+            spaceSpin *= exp(-2.2 * step)
+        } else {
+            spaceSpin = .zero
+        }
+        if spaceFlight != .zero {
+            // Faster when far out, so crossing the floor takes about the same time at any height.
+            spaceCamera.fly(spaceFlight, by: spaceCamera.distance * 0.55 * step)
+            spaceGoal = nil
+        }
+        if let goal = spaceGoal {
+            let pull = 1 - exp(-3.5 * step)
+            spaceCamera.target += (goal.target - spaceCamera.target) * pull
+            spaceCamera.distance += (goal.distance - spaceCamera.distance) * pull
+            if simd_distance(spaceCamera.target, goal.target) < 1, abs(spaceCamera.distance - goal.distance) < 1 { spaceGoal = nil }
+        }
+        reprojectSpace()
+    }
+
+    /// Projects every node, beam, tower and floor line through the camera. Holds `lock`.
+    private func reprojectSpace() {
+        let basis = spaceCamera.basis()
+        let snap = glideIsOver
+        var hostX: Float = 0
+        for offset in nodes.indices {
+            guard let point = nodes[offset].space else { continue }
+            guard let (position, depth) = SpaceCamera.project(point, basis) else {
+                nodes[offset].visibility = 0
+                continue
+            }
+            nodes[offset].anchor = position
+            if snap { nodes[offset].position = position }
+            nodes[offset].radius = nodes[offset].baseRadius * SpaceCamera.size(depth)
+            nodes[offset].visibility = SpaceCamera.fog(depth)
+            if offset == 0 { hostX = position.x }
+        }
+        // Process labels on the side away from this Mac.
+        if processCount > 0 {
+            for offset in 1...min(processCount, nodes.count - 1) {
+                nodes[offset].labelSide = nodes[offset].anchor.x >= hostX ? 1 : -1
+            }
+        }
+        for offset in edges.indices {
+            guard let a = nodes[edges[offset].from].space, let b = nodes[edges[offset].to].space else { continue }
+            // A beam arcs up, higher the further it goes; a quadratic curve through the top.
+            let middle = (a + b) * 0.5 + SIMD3(0, simd_distance(a, b) * edges[offset].lift, 0)
+            guard let (pm, depth) = SpaceCamera.project(middle, basis),
+                  let pa = SpaceCamera.project(a, basis)?.point, let pb = SpaceCamera.project(b, basis)?.point else {
+                edges[offset].visibility = 0
+                continue
+            }
+            edges[offset].fixedControl = pm * 2 - (pa + pb) * 0.5
+            edges[offset].halfWidth = edges[offset].baseHalfWidth * SpaceCamera.size(depth)
+            edges[offset].visibility = min(nodes[edges[offset].from].visibility, nodes[edges[offset].to].visibility)
+        }
+        var projected: [Bar] = []
+        projected.reserveCapacity(spaceLines.count)
+        for line in spaceLines {
+            guard let (pa, pb, depth) = SpaceCamera.project(line.a, line.b, basis) else { continue }
+            let fog = SpaceCamera.fog(depth)
+            guard fog > 0.01 else { continue }
+            var bar = Bar(
+                from: pa, to: pb, target: line.target, halfWidth: line.halfWidth * SpaceCamera.size(depth), glow: line.glow * fog,
+                color: line.color)
+            bar.pulse = line.pulse * fog
+            bar.speed = line.speed
+            bar.phase = line.phase
+            projected.append(bar)
+        }
+        bars = projected
+        settled = false
+    }
+
+    /// Orbits the cyberspace camera by a drag of `distance`, in world units. The view then
+    /// stays where it is put until reset.
+    public func orbitSpace(by distance: SIMD2<Float>) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard layoutMode == .cyberspace else { return }
+        spaceTurnedByHand = true
+        spaceSpin = .zero
+        spaceCamera.orbit(by: distance / 520)
+        reprojectSpace()
+    }
+
+    /// Lets go mid-drag: the orbit carries on and slows.
+    public func releaseSpace(velocity: SIMD2<Float>) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard layoutMode == .cyberspace, spaceTurnedByHand else { return }
+        let spin = velocity / 520
+        let speed = simd_length(spin)
+        spaceSpin = speed > 3 ? spin * (3 / speed) : spin
+    }
+
+    /// Moves the camera nearer (a factor over 1) or further away.
+    public func dollySpace(by factor: Float) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard layoutMode == .cyberspace, factor > 0 else { return }
+        spaceGoal = nil
+        spaceCamera.distance = min(max(spaceCamera.distance / factor, 250), 14_000)
+        reprojectSpace()
+    }
+
+    /// Flies while keys are held: x to the right, z ahead, each -1, 0 or 1. Zero stops.
+    public func flySpace(_ direction: SIMD3<Float>) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard layoutMode == .cyberspace else { return }
+        spaceFlight = direction
+        if direction != .zero { spaceTurnedByHand = true }
+    }
+
+    /// Glides the camera to a tower, or to this Mac or a process, and comes in closer.
+    public func flyTo(_ id: NodeID) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard layoutMode == .cyberspace, let offset = index[id], let point = nodes[offset].space else { return }
+        spaceTurnedByHand = true
+        spaceSpin = .zero
+        spaceGoal = (SIMD3(point.x, point.y * 0.6, point.z), min(spaceCamera.distance, 1300))
+    }
+
+    /// Back to the starting view, and the slow orbit resumes.
+    public func resetSpace() {
+        lock.lock()
+        defer { lock.unlock() }
+        spaceCamera = SpaceCamera()
+        spaceTurnedByHand = false
+        spaceSpin = .zero
+        spaceFlight = .zero
+        spaceGoal = nil
+        projectedSince = lastAdvance
+        if layoutMode == .cyberspace { reprojectSpace() }
+    }
+
+    /// Points the cyberspace camera, angles in radians. For pictures taken without a window.
+    public func pointSpaceCamera(yaw: Float, pitch: Float, distance: Float) {
+        lock.lock()
+        defer { lock.unlock() }
+        spaceCamera.yaw = yaw
+        spaceCamera.pitch = min(max(pitch, 0.06), 1.5)
+        spaceCamera.distance = min(max(distance, 250), 14_000)
+        spaceTurnedByHand = true
+        if layoutMode == .cyberspace { reprojectSpace() }
+    }
+
+    /// Whether the cyberspace view has been moved by hand since it was last reset.
+    public var spaceIsTurnedByHand: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return spaceTurnedByHand
+    }
+
+    /// Where a node stands in the cyberspace layout's world, for tests.
+    func spacePoint(of id: NodeID) -> SIMD3<Float>? {
+        lock.withLock { index[id].flatMap { nodes[$0].space } }
+    }
+
+    /// The cyberspace camera as it is now, for tests.
+    var spaceCameraNow: SpaceCamera { lock.withLock { spaceCamera } }
+
+    /// Whether the glide into this layout is over, so nodes can keep exactly to where they
+    /// are projected instead of trailing a moving view. Holds `lock`.
+    private var glideIsOver: Bool {
+        guard let projectedSince, let lastAdvance else { return false }
+        return lastAdvance - projectedSince > 0.9
+    }
+
     private func reprojectGlobe() {
+        let snap = glideIsOver
         for offset in nodes.indices {
             guard let point = nodes[offset].globe else { continue }
             let (position, facing) = globeView.project(point)
             nodes[offset].anchor = position
+            if snap { nodes[offset].position = position }
             nodes[offset].visibility = Self.smoothstep(-0.04, 0.16, facing)
             if nodes[offset].id != .host { nodes[offset].labelSide = position.x >= globeView.center.x ? 1 : -1 }
         }
@@ -1150,6 +1377,8 @@ public final class GraphController: @unchecked Sendable {
         defer { lock.unlock() }
         var frame = RenderFrame()
         frame.palette = scheme
+        frame.flatGrid = layoutMode != .cyberspace
+        frame.bloomScale = layoutBloom
         frame.extent = extent
         frame.halfSize = halfSize ?? SIMD2(extent, extent)
         frame.nodes.reserveCapacity(nodes.count)
@@ -1422,7 +1651,7 @@ public final class GraphController: @unchecked Sendable {
             return HoverInfo(
                 title: groupLabels[id] ?? key,
                 subtitle: "\(addresses.count) addresses · grouped by \(Self.groupName(kind))",
-                rows: rows, footnote: layoutMode == .constellation || layoutMode == .globe ? "Right-click to expand into separate addresses" : nil)
+                rows: rows, footnote: [.constellation, .globe, .cyberspace].contains(layoutMode) ? "Right-click to expand into separate addresses" : nil)
 
         case .node(.service(let service)):
             let users = Set(aggregate.flows.map(\.pid)).sorted().map(name)

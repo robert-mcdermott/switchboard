@@ -75,7 +75,7 @@ The globe also needs to know where this Mac is. It guesses from the time zone; t
 | Part | What it is |
 |---|---|
 | Top bar | The filter, the layout, the profile, and buttons for traffic within this Mac, keeping ended connections, and showing the panels and inspector |
-| Graph | The connections, in one of five layouts |
+| Graph | The connections, in one of six layouts |
 | Timeline | Drag left to go back through the last 15 minutes (Settings ▸ History, up to an hour); the graph and tables follow. **Space** holds the present moment |
 | Panels | Tables: connections, top talkers, throughput, protocols, interfaces, DNS, ages, first seen, trust, listening sockets, the log, health |
 | Inspector | Everything about what you clicked |
@@ -89,8 +89,28 @@ The globe also needs to know where this Mac is. It guesses from the time zone; t
 | **3** | Lanes | What happened when: one row per process, a bar per connection |
 | **4** | Globe | Where in the world your traffic goes |
 | **5** | Hierarchy | Account, process, domain, address, as a tree |
+| **6** | Cyberspace | The address space as a floor, in 3D, to fly through |
 
 Whatever you select stays selected when you switch.
+
+### Cyberspace
+
+The floor is the address space. IPv4 is the square on the left and IPv6's global addresses (2000::/3) the one on the right. Addresses run along a Hilbert curve, which keeps neighbouring addresses together, so each block of addresses is a block of floor. The grid divides each square into 16 × 16 blocks: an IPv4 /8 apiece, labelled where something stands in it (`52/8`), or an IPv6 /11 (`2600::/11`). Link-local and unique-local IPv6 addresses stand in the gap between the squares, under this Mac.
+
+- **A tower** stands on each destination's address. Height is the bytes it has carried, brightness its current rate, colour the kind of traffic, and pulses climb it as fast as the traffic goes. A bright ring at the top means never seen before.
+- **This Mac** floats over the gap, with a pillar of light to the floor, and its processes in a ring below it. **Beams** arc from each process to each tower it is talking to.
+- Where many towers crowd one block, each is drawn thinner and fainter, and very dense scenes get less bloom, so a busy block reads as a cluster rather than a white column.
+
+| Do | To |
+|---|---|
+| Nothing | It orbits once every five minutes (not in Still) |
+| Drag, or swipe with two fingers | Orbit; let go mid-swipe and it carries on and slows |
+| Scroll, or pinch | Move in and out |
+| W A S D, or the arrows | Fly across the floor |
+| Double-click a tower | Fly to it, and focus on it |
+| 0 | Back to the starting view; the orbit resumes |
+
+Hover, click, right-click, and the filter work as in every other layout.
 
 The globe faces this Mac and sways slowly either side of it. Drag it, or swipe with two fingers, to turn it to any part of the world; let go mid-swipe and it spins on and slows. It stays where you leave it until you press **0**, which turns it back home. ⌥-drag moves the view instead. Its coastlines are Natural Earth's 1:110m, which is in the public domain and built in.
 
@@ -177,7 +197,7 @@ Choose *Save Current as Workspace…* to add your own. *Export Settings…* and 
 
 | Key | Does |
 |---|---|
-| 1 to 5 | Layout |
+| 1 to 6 | Layout |
 | Space | Hold or release the present moment |
 | / | Jump to the filter |
 | P | Next profile |
@@ -186,6 +206,7 @@ Choose *Save Current as Workspace…* to add your own. *Export Settings…* and 
 | K | Kiosk mode |
 | L | Show or hide traffic within this Mac |
 | T | Next colour theme |
+| W A S D, arrows | Fly, in the cyberspace layout |
 | 0 | Reset zoom and pan, and turn the globe back home |
 | Esc | Leave focus or kiosk mode |
 

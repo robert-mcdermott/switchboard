@@ -318,21 +318,36 @@ public final class GraphSession: NSObject {
             $0.pan = .zero
         }
         controller.resetGlobe()
+        controller.resetSpace()
     }
 
-    /// In the globe, dragging turns the world rather than moving the view.
-    var dragTurnsGlobe: Bool { controller.layout == .globe }
+    /// In the globe, dragging turns the world rather than moving the view; in cyberspace it
+    /// orbits the camera.
+    var dragTurnsGlobe: Bool { [.globe, .cyberspace].contains(controller.layout) }
+
+    /// Cyberspace is moved through rather than zoomed as a picture.
+    var isInSpace: Bool { controller.layout == .cyberspace }
 
     /// World units per point of pointer travel.
     private var worldPerPoint: Float { loop?.read { $0.backing / $0.camera.scale } ?? 1 }
 
     func turnGlobe(byPoints delta: CGSize) {
-        controller.turnGlobe(by: SIMD2(Float(delta.width), Float(delta.height)) * worldPerPoint)
+        let distance = SIMD2(Float(delta.width), Float(delta.height)) * worldPerPoint
+        if isInSpace { controller.orbitSpace(by: distance) } else { controller.turnGlobe(by: distance) }
     }
 
     func releaseGlobe(pointsPerSecond velocity: CGSize) {
-        controller.releaseGlobe(velocity: SIMD2(Float(velocity.width), Float(velocity.height)) * worldPerPoint)
+        let speed = SIMD2(Float(velocity.width), Float(velocity.height)) * worldPerPoint
+        if isInSpace { controller.releaseSpace(velocity: speed) } else { controller.releaseGlobe(velocity: speed) }
     }
+
+    /// Nearer for a factor over 1: the camera in cyberspace, the picture elsewhere.
+    func zoomOrDolly(by factor: Float, at point: CGPoint) {
+        if isInSpace { controller.dollySpace(by: factor) } else { zoom(by: factor, at: point) }
+    }
+
+    /// Flying keys held in cyberspace, as a direction: x to the right, z ahead.
+    func fly(_ direction: SIMD3<Float>) { controller.flySpace(direction) }
 
     func hover(at point: CGPoint?) {
         guard let view, let point else {
@@ -379,6 +394,8 @@ public final class GraphSession: NSObject {
         if count >= 2 {
             // Double-click isolates a neighbourhood; double-clicking it again, or empty space, releases it.
             controller.focus = (target == controller.focus) ? nil : target
+            // In cyberspace, double-clicking something also flies to it.
+            if isInSpace, case .node(let id) = target { controller.flyTo(id) }
         }
         onSelect?(target, extend)
     }
@@ -519,7 +536,7 @@ final class GraphLayerView: NSView {
         if case .node(.process) = target { entries.append(("Reveal in Finder", 3)) }
         // Grouping belongs to the constellation, and the globe places the same groups; the
         // other layouts arrange destinations their own way.
-        if [.constellation, .globe].contains(session.controller.layout) {
+        if [.constellation, .globe, .cyberspace].contains(session.controller.layout) {
             if case .node(.network) = target { entries.append(("Expand into Addresses", 4)) }
             if case .node(.group(.asn, _)) = target { entries.append(("Expand into Addresses", 4)) }
             if case .node(.group(.country, _)) = target { entries.append(("Expand into Addresses", 4)) }
@@ -552,15 +569,61 @@ final class GraphLayerView: NSView {
             }
         } else {
             let amount = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY * 0.01 : event.scrollingDeltaY * 0.08
-            session?.zoom(by: Float(exp(amount)), at: location(event))
+            session?.zoomOrDolly(by: Float(exp(amount)), at: location(event))
         }
     }
 
     override func magnify(with event: NSEvent) {
-        session?.zoom(by: Float(1 + event.magnification), at: location(event))
+        session?.zoomOrDolly(by: Float(1 + event.magnification), at: location(event))
+    }
+
+    /// Flying keys held down: W A S D and the arrows.
+    private var flying = Set<UInt16>()
+
+    /// The flying key an event is, if it is one: W, A, S, D, or an arrow.
+    private static func flightKey(_ event: NSEvent) -> UInt16? {
+        // Key codes, so the keyboard's layout does not matter: W A S D, then left, right, down, up.
+        let codes: Set<UInt16> = [13, 0, 1, 2, 123, 124, 125, 126]
+        return codes.contains(event.keyCode) && event.modifierFlags.intersection([.command, .control, .option]).isEmpty
+            ? event.keyCode : nil
+    }
+
+    private func updateFlight() {
+        var direction = SIMD3<Float>.zero
+        for code in flying {
+            switch code {
+            case 13, 126: direction.z += 1
+            case 1, 125: direction.z -= 1
+            case 0, 123: direction.x -= 1
+            case 2, 124: direction.x += 1
+            default: break
+            }
+        }
+        session?.fly(simd_clamp(direction, SIMD3(repeating: -1), SIMD3(repeating: 1)))
+    }
+
+    override func keyUp(with event: NSEvent) {
+        if let code = Self.flightKey(event), flying.remove(code) != nil {
+            updateFlight()
+        } else {
+            super.keyUp(with: event)
+        }
+    }
+
+    override func resignFirstResponder() -> Bool {
+        // A key released while the window was elsewhere never arrives; stop rather than fly on.
+        if !flying.isEmpty {
+            flying.removeAll()
+            updateFlight()
+        }
+        return super.resignFirstResponder()
     }
 
     override func keyDown(with event: NSEvent) {
+        if session?.isInSpace == true, let code = Self.flightKey(event) {
+            if !event.isARepeat, flying.insert(code).inserted { updateFlight() }
+            return
+        }
         switch event.charactersIgnoringModifiers {
         case " ": session?.key(.togglePause)
         case "p", "P": session?.key(.cycleProfile)
@@ -574,6 +637,7 @@ final class GraphLayerView: NSView {
         case "3": session?.key(.layout(3))
         case "4": session?.key(.layout(4))
         case "5": session?.key(.layout(5))
+        case "6": session?.key(.layout(6))
         case "k", "K": session?.key(.toggleKiosk)
         case "l", "L": session?.key(.toggleThisMac)
         case "t", "T": session?.key(.cycleTheme)

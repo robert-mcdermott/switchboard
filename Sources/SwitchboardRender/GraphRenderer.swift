@@ -187,7 +187,7 @@ public final class GraphRenderer: @unchecked Sendable {
 
         var uniforms = Uniforms(
             viewport: SIMD2(Float(width), Float(height)), center: camera.center, scale: camera.scale, time: time,
-            pulseGain: profile.pulseGain, bloom: profile.bloom, grain: profile.grain, gridAlpha: profile.gridAlpha,
+            pulseGain: profile.pulseGain, bloom: profile.bloom * frame.bloomScale, grain: profile.grain, gridAlpha: frame.flatGrid ? profile.gridAlpha : 0,
             backing: backing, field: SIMD4(frame.palette.field, 1), grid: SIMD4(frame.palette.grid, 1))
         let uniformLength = MemoryLayout<Uniforms>.stride
 

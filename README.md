@@ -21,7 +21,7 @@ It is built to be watched on a wall and to be useful at a desk.
 - **History**: a log in SQLite that you can search with the same filter you use live, replay in the graph, and export as CSV or JSON lines.
 - **New things**: destinations this Mac has never talked to before are ringed and listed.
 
-## Five layouts
+## Six layouts
 
 | Key | Layout | Shows |
 |---|---|---|
@@ -30,6 +30,7 @@ It is built to be watched on a wall and to be useful at a desk.
 | **3** | Lanes | One row per process, a bar for each connection over time |
 | **4** | Globe | Destinations where they are, with arcs from this Mac (needs the location data below). Drag to turn it; **0** turns it back home |
 | **5** | Hierarchy | Account, process, domain, address, as a tree |
+| **6** | Cyberspace | The address space as a floor in 3D, a tower on each destination's address, flown through |
 
 The same things are selectable in each, and a selection carries across when you switch.
 
@@ -40,6 +41,10 @@ The same things are selectable in each, and a selection carries across when you 
 ![The globe](docs/spikes/m7-globe.jpg)
 
 ![The hierarchy](docs/spikes/m7-hierarchy.jpg)
+
+**Cyberspace** lays the whole address space out as a floor. Addresses run along a Hilbert curve, so every prefix is a compact block (an IPv4 /8 is one cell of a 16 × 16 grid) and the same address is always in the same place: cloud providers become districts you learn to recognise. Each destination is a tower on its address, as tall as the bytes it has carried and as bright as its rate. This Mac floats over the gap between the IPv4 and IPv6 squares with its processes in a ring, and beams arc from each process to its towers. It orbits slowly by itself; drag to orbit, scroll or pinch to move in, **W A S D** or the arrows to fly, double-click a tower to fly to it, **0** to come home.
+
+![The cyberspace layout](docs/cyberspace.jpg)
 
 Six colour themes, cycled with **T**: Standard, the four below (Neon, Phosphor, Amber, Ice), and Colour-safe, whose hues stay distinct with the common colour-vision deficiencies.
 

@@ -67,6 +67,15 @@ enum HeadlessCommand {
                 controller.layout = chosen
                 controller.lanesWindow = value("--lanes-window").flatMap(Double.init) ?? 60
             }
+            if let view = value("--space-view") {
+                // Degrees round, degrees up, and distance: where the cyberspace camera looks from.
+                let parts = view.split(separator: ",").compactMap { Float($0) }
+                guard parts.count == 3 else {
+                    print("--space-view takes yaw,pitch,distance, such as 20,30,3000")
+                    return 2
+                }
+                controller.pointSpaceCamera(yaw: parts[0] * .pi / 180, pitch: parts[1] * .pi / 180, distance: parts[2])
+            }
             if let name = value("--palette") {
                 guard let theme = PaletteScheme(rawValue: name) else {
                     print("--palette must be one of: \(PaletteScheme.allCases.map(\.rawValue).joined(separator: ", "))")

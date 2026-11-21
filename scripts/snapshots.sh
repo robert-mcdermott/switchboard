@@ -25,7 +25,7 @@ status=0
 for entry in "quiet quiet constellation standard" "developer developer constellation standard" \
              "stress stress constellation standard" "flow developer flow standard" "lanes developer lanes standard" \
              "globe developer globe standard" "hierarchy developer hierarchy standard" \
-             "neon-globe developer globe neon"; do
+             "neon-globe developer globe neon" "cyberspace developer cyberspace standard"; do
   set -- $entry
   name="$1"; scenario="$2"; layout="$3"; palette="$4"
   "$APP" --snapshot "$OUT/$name.png" --source "sim:$scenario" --layout "$layout" --palette "$palette" --at 20 --size 1200x750 >/dev/null

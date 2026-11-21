@@ -25,6 +25,9 @@ extension GraphController {
         var groupLabels: [NodeID: String]
         var home: GeoPoint
         var globeView: GlobeView
+        var spaceCamera = SpaceCamera()
+        /// Destinations the log had never seen before.
+        var novel: Set<IPAddress> = []
     }
 
     struct LayoutScene {
@@ -39,6 +42,8 @@ extension GraphController {
         var labels: [NodeID: String] = [:]
         var nodeFor: [IPAddress: NodeID] = [:]
         var globeLines: [GlobeLine] = []
+        var spaceLines: [SpaceLine] = []
+        var bloomScale: Float = 1
         var connectionNodes: [AddressEdge: NodeID] = [:]
         /// Filter expressions that select what a node stands for, where the app cannot work it out.
         var filters: [NodeID: String] = [:]
