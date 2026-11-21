@@ -6,7 +6,6 @@ import Metal
 ///
 /// Drawing labels in Metal rather than as views is what lets thousands of nodes keep
 /// their frame rate (docs/SPEC.md §2).
-@MainActor
 final class LabelAtlas {
     struct Entry {
         /// Left, top, right, bottom in texture coordinates.
@@ -104,7 +103,6 @@ final class LabelAtlas {
 }
 
 /// App icons for process nodes, in fixed slots of one texture.
-@MainActor
 final class IconAtlas {
     let texture: MTLTexture
     static let slot = 64

@@ -1,5 +1,5 @@
 import AppKit
-import MetalKit
+import QuartzCore
 
 /// Saves a picture of the whole window from inside the app, for checking layout without
 /// screen-recording permission. AppKit can draw every view except the Metal one, so the
@@ -29,8 +29,9 @@ enum WindowCapture {
         try? png.write(to: url)
     }
 
-    private static func findMetalView(in view: NSView) -> MTKView? {
-        if let metal = view as? MTKView { return metal }
+    /// The view whose layer the graph is drawn into.
+    private static func findMetalView(in view: NSView) -> NSView? {
+        if view.layer is CAMetalLayer { return view }
         for child in view.subviews {
             if let found = findMetalView(in: child) { return found }
         }

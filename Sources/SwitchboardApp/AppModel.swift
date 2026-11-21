@@ -285,7 +285,8 @@ final class AppModel {
 
     /// The model the tables are showing: the present, or the moment being scrubbed to.
     @ObservationIgnored private var snapshot: EngineSnapshot?
-    @ObservationIgnored private var latest: EngineSnapshot?
+    @ObservationIgnored private(set) var latest: EngineSnapshot?
+    @ObservationIgnored private var soak: SoakRecorder?
     @ObservationIgnored private var window = TimeWindow()
     @ObservationIgnored private var feed: LiveFeed?
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
@@ -383,6 +384,10 @@ final class AppModel {
         }
 
         openLog(path: value("--log-db"))
+        if let path = value("--soak") {
+            soak = SoakRecorder(path: path, hours: value("--hours").flatMap(Double.init) ?? 8, model: self)
+            soak?.start()
+        }
 
         if let text = value("--filter") {
             filterText = text
@@ -1114,6 +1119,15 @@ final class AppModel {
     }
 
     /// Facts about a run, gathered from inside the app, for measurement and screenshots.
+    /// The log's size on disk, with its write-ahead file.
+    func logFileBytes() -> Double {
+        guard let url = store?.url else { return 0 }
+        return ["", "-wal"].reduce(0.0) { total, suffix in
+            let size = (try? FileManager.default.attributesOfItem(atPath: url.path + suffix)[.size] as? NSNumber)?.doubleValue ?? 0
+            return total + size
+        }
+    }
+
     func writeMeasurement(to path: String, measured: FrameStats.Summary) {
         let processStart = ProcessTable.bsdInfo(of: getpid()).map {
             Double($0.pbi_start_tvsec) + Double($0.pbi_start_tvusec) / 1e6

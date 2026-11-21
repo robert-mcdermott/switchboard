@@ -64,8 +64,8 @@ public enum RenderProfile: String, CaseIterable, Sendable {
 ///
 /// It renders into any texture, so the window and the headless snapshot path share every
 /// line of drawing code.
-@MainActor
-public final class GraphRenderer {
+/// Used from one thread at a time: the render thread in the app, the main thread headless.
+public final class GraphRenderer: @unchecked Sendable {
     public enum RendererError: Error {
         case unavailable(String)
     }

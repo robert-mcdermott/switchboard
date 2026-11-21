@@ -231,14 +231,18 @@ struct TopBar: View {
 
     var body: some View {
         HStack(spacing: 12) {
+            // The name never gives way; in a narrow window the mode line and figures do.
             Text("SWITCHBOARD")
                 .font(.mono(12, .semibold))
                 .kerning(3)
                 .foregroundStyle(Color.signal)
+                .fixedSize()
 
             Text(model.modeLine)
                 .font(.mono(10))
                 .foregroundStyle(Color.dim)
+                .lineLimit(1)
+                .layoutPriority(-1)
                 .help("Standalone mode sees your own processes. System daemons need the collector.")
 
             HStack(spacing: 6) {
@@ -325,6 +329,7 @@ struct TopBar: View {
                 .font(.mono(11))
                 .foregroundStyle(Color.readout)
                 .lineLimit(1)
+                .layoutPriority(-1)
 
             Picker("Layout", selection: Binding(get: { model.layout }, set: { model.setLayout($0) })) {
                 Image(systemName: "circle.hexagongrid").tag(GraphLayout.constellation).help("Constellation (1)")
