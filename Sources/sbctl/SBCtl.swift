@@ -13,6 +13,7 @@ enum SBCtl {
           sbctl bench [--flows N] | --live                 engine cost, simulated or on this machine
           sbctl verify                                     check the live engine against netstat and known traffic
           sbctl tap [--socket PATH] [--json] [--seconds N] watch what the collector publishes
+          sbctl log stats | query | export | prune | purge  read and maintain the log (sbctl log for details)
 
           sources: nstat (default), nettop, nstat+nettop, collector[:socket], sim:<scenario>, trace:<file>
           scenarios: quiet, developer, stress, beacon, portscan
@@ -35,6 +36,7 @@ enum SBCtl {
             case "bench": return try BenchCommand.run(options)
             case "verify": return try VerifyCommand.run(options)
             case "tap": return try TapCommand.run(options)
+            case "log": return try LogCommand.run(Array(arguments.dropFirst()))
             default: break
             }
         } catch {

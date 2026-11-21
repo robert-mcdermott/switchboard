@@ -3,6 +3,7 @@ import Observation
 import SwitchboardCore
 import SwitchboardRender
 import SwitchboardSources
+import SwitchboardStore
 
 /// One connection, flattened for tables.
 struct ConnectionRow: Identifiable, Sendable {
@@ -72,6 +73,50 @@ struct ListenerRow: Identifiable, Sendable {
     var exposed: Bool
 }
 
+/// A connection from the log.
+struct LogRow: Identifiable, Sendable {
+    let id: FlowID
+    var started: Date
+    var ended: Date?
+    var process: String
+    var pid: Int
+    var remote: String
+    var port: Int
+    var service: String
+    var bytesIn: Double
+    var bytesOut: Double
+    var duration: Double
+}
+
+/// A destination this Mac had never talked to before.
+struct FirstSeenRow: Identifiable, Sendable {
+    var id: String { address }
+    var address: String
+    var host: String
+    var process: String
+    var at: Date
+}
+
+struct AgeBucket: Identifiable, Sendable {
+    var id: String { label }
+    var label: String
+    var count: Int
+}
+
+enum LogRange: String, CaseIterable, Sendable {
+    case quarterHour = "15 min", hour = "1 hour", day = "24 hours", week = "7 days", all = "Everything"
+
+    var seconds: Double? {
+        switch self {
+        case .quarterHour: 900
+        case .hour: 3600
+        case .day: 86_400
+        case .week: 604_800
+        case .all: nil
+        }
+    }
+}
+
 /// One DNS answer, for the DNS panel.
 struct DNSRow: Identifiable, Sendable {
     let id: UInt64
@@ -99,7 +144,7 @@ struct ThroughputSample: Identifiable, Sendable {
 }
 
 enum PanelTab: String, CaseIterable, Sendable {
-    case connections, talkers, throughput, mix, interfaces, dns, listeners, health
+    case connections, talkers, throughput, mix, interfaces, dns, ages, firstSeen, listeners, log, health
 
     var title: String {
         switch self {
@@ -109,6 +154,9 @@ enum PanelTab: String, CaseIterable, Sendable {
         case .mix: "Protocols"
         case .interfaces: "Interfaces"
         case .dns: "DNS"
+        case .ages: "Ages"
+        case .firstSeen: "First Seen"
+        case .log: "Log"
         case .listeners: "Listening"
         case .health: "Health"
         }
@@ -144,7 +192,12 @@ final class AppModel {
     private(set) var filter = FlowFilter.all
     var showInspector = true
     var showPanel = true { didSet { derive() } }
-    var panelTab = PanelTab.connections { didSet { derive() } }
+    var panelTab = PanelTab.connections {
+        didSet {
+            derive()
+            if panelTab == .log { runLogQuery() }
+        }
+    }
     /// Everything pinned in the inspector. ⌘-click adds to it.
     var selection = Set<PickTarget>()
     var focused = false
@@ -156,7 +209,7 @@ final class AppModel {
     private(set) var scrubTime: EngineTime?
     private(set) var timeRange: ClosedRange<EngineTime>?
     private(set) var displayedWallClock: Double = 0
-    var paused: Bool { scrubTime != nil }
+    var paused: Bool { scrubTime != nil || logMoment != nil }
 
     var savedFilters: [String] = UserDefaults.standard.stringArray(forKey: "savedFilters") ?? []
     private(set) var scan: ScanResult?
@@ -175,6 +228,23 @@ final class AppModel {
     private(set) var ports: [Talker] = []
     private(set) var interfaces: [Talker] = []
     private(set) var dns: [DNSRow] = []
+    private(set) var ages: [AgeBucket] = []
+    private(set) var lingering: [ConnectionRow] = []
+    private(set) var firstSeen: [FirstSeenRow] = []
+
+    // The log.
+    private(set) var logAvailable = false
+    private(set) var logNote = ""
+    var logRange = LogRange.hour { didSet { runLogQuery() } }
+    private(set) var logRows: [LogRow] = []
+    private(set) var logHistogram: [Int] = []
+    private(set) var logSummary = ""
+    private(set) var logSpan: ClosedRange<Double>?
+    private(set) var logBusy = false
+    private(set) var logStats = LogStats()
+    /// The past moment from the log being shown in the graph, if any.
+    private(set) var logMoment: Double?
+    var redactExports = false
     private(set) var history: [ThroughputSample] = []
     private(set) var inspector: HoverInfo?
     private(set) var inspectorRows: [ConnectionRow] = []
@@ -193,7 +263,11 @@ final class AppModel {
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
     @ObservationIgnored private var sampleCount = 0
     @ObservationIgnored private var scrubRequest: Double?
+    @ObservationIgnored private var logMomentRequest: Double?
     @ObservationIgnored private var derivation = 0
+    @ObservationIgnored private var store: LogStore?
+    @ObservationIgnored private var logQuery = 0
+    @ObservationIgnored private var lastPrune = Date.distantPast
 
     init() {
         let arguments = CommandLine.arguments
@@ -263,6 +337,8 @@ final class AppModel {
             failure = "\(error)"
         }
 
+        openLog(path: value("--log-db"))
+
         if let text = value("--filter") {
             filterText = text
             applyFilter()
@@ -280,6 +356,7 @@ final class AppModel {
         if let mode = value("--clustering") { applyClustering(mode, threshold: 300) }
         if let scheme = value("--palette").flatMap(PaletteScheme.init(rawValue:)) { controller.palette = scheme }
         scrubRequest = value("--scrub-back").flatMap(Double.init)
+        logMomentRequest = value("--log-back").flatMap(Double.init)
         if arguments.contains("--scan") { scanAllUsers() }
 
         let center = NotificationCenter.default
@@ -312,7 +389,7 @@ final class AppModel {
 
     /// Pausing is scrubbing to this moment and staying there.
     func togglePause() {
-        if scrubTime != nil { goLive() } else if let now = timeRange?.upperBound { scrub(to: now) }
+        if paused { goLive() } else if let now = timeRange?.upperBound { scrub(to: now) }
     }
 
     /// Shows the moment `time` on the graph and in every table.
@@ -327,6 +404,7 @@ final class AppModel {
 
     func goLive() {
         scrubTime = nil
+        logMoment = nil
         snapshot = latest
         displayedWallClock = latest?.wallClock ?? 0
         session.controller.hold(nil)
@@ -367,6 +445,7 @@ final class AppModel {
             filterError = nil
             session.controller.filter = parsed
             derive()
+            if panelTab == .log { runLogQuery() }
         } catch {
             filterError = error.message
         }
@@ -461,6 +540,138 @@ final class AppModel {
         filterFocusRequests += 1
     }
 
+    // MARK: - The log
+
+    private func openLog(path: String?) {
+        // Invented traffic is kept out of the real log; a log is only written for a
+        // simulation when one is named.
+        if simulated, path == nil {
+            logNote = "Simulated traffic is not logged."
+            return
+        }
+        guard UserDefaults.standard.object(forKey: "logging") as? Bool ?? true else {
+            logNote = "Logging is turned off in Settings."
+            return
+        }
+        do {
+            let detail = UserDefaults.standard.string(forKey: "logDetail").flatMap(LogDetail.init(rawValue:)) ?? .standard
+            let store = try LogStore(url: path.map { URL(fileURLWithPath: $0) } ?? LogStore.defaultURL(), detail: detail)
+            store.onFirstSeen = { [weak self] addresses in
+                Task { @MainActor in self?.noteFirstSeen(addresses) }
+            }
+            self.store = store
+            logAvailable = true
+        } catch {
+            logNote = "The log could not be opened: \(error)"
+        }
+    }
+
+    private func noteFirstSeen(_ addresses: [IPAddress]) {
+        session.controller.markFirstSeen(addresses, time: session.time)
+        let flows = latest?.flows ?? []
+        let processes = Dictionary(uniqueKeysWithValues: (latest?.processes ?? []).map { ($0.pid, $0) })
+        for address in addresses {
+            let flow = flows.first { $0.key.remote.address == address }
+            firstSeen.insert(FirstSeenRow(
+                address: address.description, host: flow?.hostname ?? "",
+                process: flow.map { processes[$0.pid]?.name ?? "pid \($0.pid)" } ?? "–", at: Date()), at: 0)
+        }
+        if firstSeen.count > 200 { firstSeen.removeLast(firstSeen.count - 200) }
+    }
+
+    /// Searches the log with the current filter and range. Runs off the main thread;
+    /// a newer search overtakes an older one.
+    func runLogQuery() {
+        guard let store else { return }
+        logQuery += 1
+        let generation = logQuery
+        let filter = self.filter
+        let range = logRange
+        logBusy = true
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let now = Date().timeIntervalSince1970
+            let stats = (try? store.stats()) ?? LogStats()
+            let from = range.seconds.map { now - $0 } ?? (stats.oldest ?? now - 3600)
+            let result = try? store.query(filter, from: from, to: now, limit: 1000)
+            await self?.showLog(result, stats: stats, generation: generation)
+        }
+    }
+
+    private func showLog(_ result: LogQueryResult?, stats: LogStats, generation: Int) {
+        guard generation == logQuery else { return }
+        logBusy = false
+        logStats = stats
+        guard let result else {
+            logSummary = "The search failed."
+            return
+        }
+        logRows = result.entries.map { entry in
+            let flow = entry.flow
+            return LogRow(
+                id: flow.id, started: Date(timeIntervalSince1970: flow.firstSeen),
+                ended: flow.closedAt.map { Date(timeIntervalSince1970: $0) }, process: entry.process.name, pid: Int(flow.pid),
+                remote: flow.hostname ?? flow.key.remote.address.description, port: Int(flow.key.remote.port),
+                service: flow.service ?? "–", bytesIn: Double(flow.bytesIn), bytesOut: Double(flow.bytesOut),
+                duration: (flow.closedAt ?? flow.lastSeen) - flow.firstSeen)
+        }
+        logHistogram = result.histogram
+        logSpan = result.from...max(result.to, result.from + 1)
+        let shown = result.matched > result.entries.count ? ", newest \(result.entries.count) listed" : ""
+        logSummary = String(format: "%d connections match%@ · %.0f ms", result.matched, shown, result.milliseconds)
+    }
+
+    /// Shows the graph and the tables as the log remembers a past moment.
+    func showLogMoment(_ moment: Double) {
+        guard let store else { return }
+        logMoment = moment
+        scrubTime = nil
+        Task.detached(priority: .userInitiated) { [weak self] in
+            guard let snapshot = try? store.snapshot(at: moment) else { return }
+            await self?.present(snapshot, moment: moment)
+        }
+    }
+
+    private func present(_ past: EngineSnapshot, moment: Double) {
+        // The slider may have moved on, or the user gone back to the present.
+        guard logMoment == moment else { return }
+        snapshot = past
+        displayedWallClock = moment
+        session.controller.hold(past)
+        derive()
+    }
+
+    func exportLog(_ format: ExportFormat) {
+        guard let store else { return }
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "switchboard-log.\(format.rawValue)"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let filter = self.filter, redact = redactExports, range = logRange
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let now = Date().timeIntervalSince1970
+            let from = range.seconds.map { now - $0 } ?? 0
+            let written = try? store.export(filter, from: from, to: now, format: format, redactHostnames: redact, to: url)
+            await self?.exportFinished(written, url: url)
+        }
+    }
+
+    private func exportFinished(_ written: Int?, url: URL) {
+        logSummary = written.map { "Wrote \($0) connections to \(url.lastPathComponent)" } ?? "The export failed."
+    }
+
+    func purgeLog() {
+        guard let store else { return }
+        let alert = NSAlert()
+        alert.messageText = "Erase the whole log?"
+        alert.informativeText = "Every recorded connection, DNS answer, and first-seen date will be deleted. This cannot be undone. Recording continues afterwards."
+        alert.addButton(withTitle: "Erase")
+        alert.addButton(withTitle: "Cancel")
+        alert.alertStyle = .warning
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        try? store.purge()
+        firstSeen = []
+        runLogQuery()
+    }
+
     // MARK: - Scanning beyond Standalone
 
     /// Runs `nettop` once to count the sockets Standalone mode cannot show. `nettop` is
@@ -539,7 +750,21 @@ final class AppModel {
     private func receive(_ snapshot: EngineSnapshot) {
         latest = snapshot
         window.append(snapshot)
+        store?.record(snapshot)
+        // Old history is trimmed once an hour, off the main thread.
+        if let store, Date().timeIntervalSince(lastPrune) > 3600 {
+            lastPrune = Date()
+            let days = UserDefaults.standard.object(forKey: "logDays") as? Double ?? 30
+            let megabytes = UserDefaults.standard.object(forKey: "logMegabytes") as? Double ?? 2000
+            Task.detached(priority: .utility) { _ = try? store.prune(maximumAge: days * 86_400, maximumBytes: Int(megabytes * 1_000_000)) }
+        }
         timeRange = window.range
+        if panelTab == .log, logRows.isEmpty, !logBusy, snapshot.time > 3 { runLogQuery() }
+        if let back = logMomentRequest, snapshot.time > back + 3 {
+            // For screenshots: show a moment from the log once there is one to show.
+            logMomentRequest = nil
+            showLogMoment(Date().timeIntervalSince1970 - back)
+        }
         if let back = scrubRequest, snapshot.time > back + 2 {
             // For screenshots: jump back once there is enough history to jump into.
             scrubRequest = nil
@@ -554,7 +779,7 @@ final class AppModel {
         history.append(ThroughputSample(id: sampleCount, time: Date(), rateIn: rateIn, rateOut: rateOut))
         if history.count > 300 { history.removeFirst(history.count - 300) }
         // While the past is on screen, the tables stay with it.
-        guard scrubTime == nil else { return }
+        guard scrubTime == nil, logMoment == nil else { return }
         self.snapshot = snapshot
         displayedWallClock = snapshot.wallClock
         derive()
@@ -572,6 +797,8 @@ final class AppModel {
         var ports: [Talker] = []
         var interfaces: [Talker] = []
         var dns: [DNSRow] = []
+        var ages: [AgeBucket] = []
+        var lingering: [ConnectionRow] = []
 
         /// Runs off the main thread: on a busy machine this is tens of milliseconds, and
         /// on the main thread that is a dropped frame every second.
@@ -610,6 +837,21 @@ final class AppModel {
             derived.services = rank(Dictionary(grouping: matching) { $0.service ?? "unidentified" }) { $0 }
             derived.ports = rank(Dictionary(grouping: matching) { "\($0.key.proto.rawValue)/\($0.key.remote.port)" }) { $0 }
             derived.interfaces = rank(Dictionary(grouping: matching) { $0.interface ?? "unknown" }) { $0 }
+
+            // How long connections have been open, and the ones that have been open a long
+            // time while carrying almost nothing: the shape of something phoning home.
+            let limits: [(String, Double)] = [("under 10 s", 10), ("10 s – 1 min", 60), ("1 – 10 min", 600), ("10 min – 1 h", 3600), ("1 h – 1 day", 86_400), ("over a day", .infinity)]
+            var counts = [Int](repeating: 0, count: limits.count)
+            for flow in matching {
+                let age = flow.age(at: snapshot.time)
+                counts[limits.firstIndex { age < $0.1 } ?? limits.count - 1] += 1
+            }
+            derived.ages = zip(limits, counts).map { AgeBucket(label: $0.0.0, count: $0.1) }
+            derived.lingering = matching
+                .filter { $0.age(at: snapshot.time) > 3600 && $0.bytesTotal < 100_000 && !$0.key.remote.address.isLoopback }
+                .sorted { $0.firstSeen < $1.firstSeen }
+                .prefix(30)
+                .map { ConnectionRow($0, process: processes[$0.pid], now: snapshot.time) }
 
             // Newest first, each with how many connections are using what it resolved to.
             var perAddress: [IPAddress: Int] = [:]
@@ -664,6 +906,8 @@ final class AppModel {
         ports = derived.ports
         interfaces = derived.interfaces
         dns = derived.dns
+        ages = derived.ages
+        lingering = derived.lingering
         listeners = derived.listeners
         deriveInspector()
     }
@@ -754,6 +998,12 @@ final class AppModel {
             "inspectorTitle": inspector?.title ?? "",
             "inspectorRows": inspectorRows.count,
             "scrubbedTo": scrubTime ?? -1,
+            "logAvailable": logAvailable,
+            "logFlows": logStats.flows,
+            "logRows": logRows.count,
+            "logSummary": logSummary,
+            "logMoment": logMoment ?? -1,
+            "ageBuckets": ages.map(\.count),
             "mode": modeLine,
             "sourceLines": summary.sources,
             "keepEnded": keepEnded,

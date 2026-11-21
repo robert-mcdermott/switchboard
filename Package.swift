@@ -38,13 +38,14 @@ let package = Package(
         // Terminal viewer and diagnostics.
         .executableTarget(
             name: "sbctl",
-            dependencies: ["SwitchboardCore", "SwitchboardSources"]
+            dependencies: ["SwitchboardCore", "SwitchboardSources", "SwitchboardStore"]
         ),
 
-        // SQLite log. GRDB is added here, and only here, in M5.
+        // SQLite log, on the SQLite that ships with macOS. No third-party code.
         .target(
             name: "SwitchboardStore",
-            dependencies: ["SwitchboardCore"]
+            dependencies: ["SwitchboardCore"],
+            linkerSettings: [.linkedLibrary("sqlite3")]
         ),
 
         // Metal engine, layouts, picking.
@@ -72,6 +73,10 @@ let package = Package(
         .testTarget(
             name: "SwitchboardSourcesTests",
             dependencies: ["SwitchboardSources", "SwitchboardCore", "CDarwinPrivate"]
+        ),
+        .testTarget(
+            name: "SwitchboardStoreTests",
+            dependencies: ["SwitchboardStore", "SwitchboardCore"]
         ),
         .testTarget(
             name: "SwitchboardRenderTests",

@@ -26,9 +26,9 @@ sudo scripts/uninstall.sh
 | `scripts/install.sh` and `uninstall.sh` | Done; run by the owner |
 | The install command offered in the app | Done, in the Health panel, with a Copy button |
 | Collector section in Health | Mode, what it means, and each collector source's status |
-| Packet capture with filtering in our own code | Built; **not yet run as root** |
-| DNS answers, with the process that asked | Built and tested on synthetic packets |
-| TLS server names, including handshakes that span segments | Built and tested on synthetic packets |
+| Packet capture with filtering in our own code | Done; run as root by the owner |
+| DNS answers, with the process that asked | Done: 44 read in the root run |
+| TLS server names, including handshakes that span segments | Done: 76 read in the root run, 16 of them across segments |
 | Observed service labels: TLS, QUIC, DNS | Built |
 | Hostname modes Off and Passive; source shown with each name | Done |
 | DNS Activity panel | Done |
@@ -57,7 +57,7 @@ sudo scripts/uninstall.sh
 
 ## Part two: what was verified, and how
 
-Capture needs root, so none of it could be run here. Three things stand in for that:
+Capture needs root, so none of it could be run during development. Three things stood in for that, before the owner's root run below confirmed it on real traffic:
 
 - **The packet layout is known to be right.** The M0 probe, run as root on this machine, found the PKTAP header at exactly the length declared, and read DNS answers and TLS names from live packets with the same parsers.
 - **The inspector is tested on synthetic packets** built in that verified layout: Ethernet, loopback, and raw link types; IPv4 and IPv6; DNS answers with and without a delegating process; TLS hellos in one segment and split across two, three, and five; QUIC detected once per connection; interleaved connections kept apart; fragments, plain data, and unrecognised headers dismissed; every truncation and three thousand packets of noise survived.
@@ -70,31 +70,40 @@ Capture needs root, so none of it could be run here. Three things stand in for t
 | The running window | 103 DNS rows, hostnames as graph labels and in the table |
 | Unprivileged daemon | Starts without capture and says so: "packet capture unavailable: needs root" |
 
-## What still needs a root run
+## The root run
 
-```bash
-sudo scripts/install.sh
+The owner installed the collector and used the app on real traffic on 2026-11-21. The Health panel read:
+
+```
+FULL · every account, via the collector
+nstat: 220 sockets tracked, 2143 seen, 7 updates unreadable
+kernel: 207 sockets
+capture: 20583 packets, 44 DNS answers, 76 TLS names (16 across segments), 4 QUIC
+76 connections · 112 listening sockets (38 exposed) · 125 processes
+117 frames/s · slowest 1% of frames 22.6 ms · GPU 2.7 ms · 102 nodes · 119 lines
 ```
 
-then open the app, and
-
-```bash
-.build/release/sbctl tap --seconds 10
-```
-
-| Question | Where the answer shows |
+| Question | Answer |
 |---|---|
-| Does live capture start, and are DNS answers and TLS names read? | The `capture:` line in `sbctl tap` and in the Health panel counts packets, DNS answers, and TLS names |
-| How many TLS names needed more than one segment? | The same line: "(N across segments)". This is the M0 question about browser handshakes |
-| What does inspecting every packet cost? | CPU of `switchboardd` in Activity Monitor during a large download |
-| Are any packets dropped? | The same line reports drops |
-| Do most HTTPS connections carry a hostname? | The Host column of the Connections table |
-| Does root NetworkStatistics plus the kernel socket list reach 100% of `netstat`? | Not yet measurable from a script |
-| Is a non-administrator refused? | Connect from a standard account |
+| Does live capture start, and are DNS answers and TLS names read? | Yes: 44 DNS answers and 76 TLS server names from 20,583 packets |
+| How many TLS names needed more than one segment? | 16 of 76, about one in five. The reassembly is needed, and the 256-byte snap length in the original spec would have lost those names |
+| Is the PKTAP header still as declared? | Yes. The line would report packets with an unrecognised header, and reports none |
+| Are any packets dropped? | None reported |
+| Does the kernel socket list work as root inside the collector? | Yes: 207 sockets |
+| Does the app hold its frame rate in Full mode? | 117 frames a second |
+
+Still open:
+
+| Question | Note |
+|---|---|
+| What does inspecting every packet cost under heavy traffic? | This run was ordinary use. Measure `switchboardd` during a large download |
+| Do NetworkStatistics and the kernel list together reach 100% of `netstat`? | NetworkStatistics was tracking 220 sockets and the kernel list 207, but the two count differently (the kernel list leaves out sockets it is only holding closed), so this does not settle it |
+| What are the 7 unreadable updates? | Unprivileged there is one, an empty placeholder. As root there are more; worth a look at what they are |
+| Is a non-administrator refused? | Not tested |
 
 ## Not built
 
-**Attribution of very short flows from packets.** The roadmap had capture attribute connections too brief for polling, by watching SYN and FIN. M1 then measured NetworkStatistics catching 30 of 30 connections lasting 10 to 100 ms, because it reports opens as events. Building a second, packet-derived flow source to cover a gap that measurement did not find would add a lot of code to the root process for no shown benefit. If the root run above, or the burst test, shows connections being missed, this is the fix.
+**Attribution of very short flows from packets.** The roadmap had capture attribute connections too brief for polling, by watching SYN and FIN. M1 then measured NetworkStatistics catching 30 of 30 connections lasting 10 to 100 ms, because it reports opens as events. Building a second, packet-derived flow source to cover a gap that measurement did not find would add a lot of code to the root process for no shown benefit. If the burst test shows connections being missed, this is the fix.
 
 **Clustering by domain.** Hostnames now exist; grouping destinations by registered domain is not done.
 

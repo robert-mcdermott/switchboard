@@ -43,6 +43,10 @@ struct SettingsView: View {
     @AppStorage("historyMinutes") private var historyMinutes = 15.0
     @AppStorage("profile") private var profile = "cinema"
     @AppStorage("hostnames") private var hostnames = "passive"
+    @AppStorage("logging") private var logging = true
+    @AppStorage("logDetail") private var logDetail = "standard"
+    @AppStorage("logDays") private var logDays = 30.0
+    @AppStorage("logMegabytes") private var logMegabytes = 2000.0
 
     var body: some View {
         Form {
@@ -81,6 +85,20 @@ struct SettingsView: View {
             Section("History") {
                 Stepper("Keep \(Int(historyMinutes)) minutes for the timeline", value: $historyMinutes, in: 1...60, step: 1)
                 Text("History is held in memory only. A very busy machine keeps less than this, to bound memory use.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section("Log") {
+                Toggle("Record connections to a local log", isOn: $logging)
+                Picker("Detail", selection: $logDetail) {
+                    Text("Connections only").tag("summary")
+                    Text("Connections, DNS answers, listeners").tag("standard")
+                    Text("All of that, and a byte count each second").tag("detailed")
+                }
+                .disabled(!logging)
+                Stepper("Keep \(Int(logDays)) days", value: $logDays, in: 1...365, step: 1).disabled(!logging)
+                Stepper("Keep at most \(Int(logMegabytes)) MB", value: $logMegabytes, in: 100...20_000, step: 100).disabled(!logging)
+                Text("The log stays on this Mac, in Application Support. Turning logging on or off, or changing the detail, takes effect the next time Switchboard starts.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

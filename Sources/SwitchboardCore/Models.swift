@@ -104,6 +104,40 @@ public struct Flow: Sendable, Codable, Identifiable {
     /// Which source this flow's attribution came from.
     public var attribution: String
 
+    public init(
+        id: FlowID, key: FlowKey, pid: Int32, direction: FlowDirection, interface: String?, state: FlowState,
+        tcpState: TCPState?, firstSeen: EngineTime, lastSeen: EngineTime, lastActive: EngineTime, closedAt: EngineTime?,
+        ageExact: Bool, bytesIn: UInt64, bytesOut: UInt64, packetsIn: UInt64, packetsOut: UInt64, rateIn: Double,
+        rateOut: Double, rttMS: Double?, retransmittedBytes: UInt64?, service: String?, serviceBasis: ServiceBasis?,
+        hostname: String?, hostnameSource: NameSource? = nil, attribution: String
+    ) {
+        self.id = id
+        self.key = key
+        self.pid = pid
+        self.direction = direction
+        self.interface = interface
+        self.state = state
+        self.tcpState = tcpState
+        self.firstSeen = firstSeen
+        self.lastSeen = lastSeen
+        self.lastActive = lastActive
+        self.closedAt = closedAt
+        self.ageExact = ageExact
+        self.bytesIn = bytesIn
+        self.bytesOut = bytesOut
+        self.packetsIn = packetsIn
+        self.packetsOut = packetsOut
+        self.rateIn = rateIn
+        self.rateOut = rateOut
+        self.rttMS = rttMS
+        self.retransmittedBytes = retransmittedBytes
+        self.service = service
+        self.serviceBasis = serviceBasis
+        self.hostname = hostname
+        self.hostnameSource = hostnameSource
+        self.attribution = attribution
+    }
+
     public var bytesTotal: UInt64 { bytesIn &+ bytesOut }
     public var rateTotal: Double { rateIn + rateOut }
 

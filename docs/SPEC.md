@@ -2,7 +2,7 @@
 
 A real-time network observatory for macOS. Every connection on the machine, who owns it, where it goes, and how hard it is working — drawn as a living graph that an operator can read at a glance and interrogate in seconds.
 
-**Status:** v0.4 draft, revised after M0, M1, and M2 · **Companions:** [ROADMAP.md](ROADMAP.md) · [M0 findings](spikes/M0-findings.md) · [M1 findings](spikes/M1-findings.md) · [M2 findings](spikes/M2-findings.md) · [M3 findings](spikes/M3-findings.md) · [M4 findings](spikes/M4-findings.md)
+**Status:** v0.4 draft, revised after M0, M1, and M2 · **Companions:** [ROADMAP.md](ROADMAP.md) · [M0 findings](spikes/M0-findings.md) · [M1 findings](spikes/M1-findings.md) · [M2 findings](spikes/M2-findings.md) · [M3 findings](spikes/M3-findings.md) · [M4 findings](spikes/M4-findings.md) · [M5 findings](spikes/M5-findings.md)
 
 ---
 
@@ -43,7 +43,7 @@ The research document is the source of requirements. This spec keeps its goals a
 | Packet capture | Primary rate source, `ip or ip6` | **Metadata only**: DNS answers, TLS SNI, SYN/FIN timing, filtered in our own code | Capture stops being a hot path; a capture failure costs hostnames, not the product |
 | nettop | First fallback | **On-demand scan** in Standalone; fallback if NetworkStatistics fails | It is Apple-signed and is the only unprivileged view of other users' flows, but it uses about 1.4 CPU cores while sampling, so it cannot run continuously |
 | IPC encoding | Protobuf or MessagePack | **Hand-written binary codec**, no third-party code | Both ends ship from one package at one version; the root daemon should link nothing it does not have to |
-| Dependencies | GRDB, SwiftProtobuf, an mmdb reader | **GRDB only**, and only in the unprivileged app | Smaller supply chain; the MMDB format is small enough to read ourselves |
+| Dependencies | GRDB, SwiftProtobuf, an mmdb reader | **None.** The log uses the SQLite that ships with macOS | Smaller supply chain; a thin wrapper over system SQLite was enough (M5) |
 | Build | `xcodebuild` for the app | **SwiftPM only** plus a bundling script | No project file to maintain, and it builds with any recent Swift toolchain. `xcodebuild` works on the dev machine but nothing requires it |
 | Shaders | Unspecified | Metal shader **source compiled at launch** | Keeps the build to plain `swift build` with no separate shader step; a trivial shader compiled in about 200 ms cold on the dev Mac (§3) |
 | Graph labels | SwiftUI overlay | **Drawn in Metal** from a CoreText-rasterised atlas | Thousands of SwiftUI text views cannot hold 60 fps |
@@ -164,7 +164,7 @@ One SwiftPM package, Swift 6 language mode, strict concurrency, deployment targe
 | `SwitchboardSources` | library | Source adapters (kernel list, NStat, libproc, PKTAP, nettop, simulator, trace replay) | none |
 | `switchboardd` | executable | Root collector | none |
 | `sbctl` | executable | Terminal viewer, diagnostics, trace record/replay | none |
-| `SwitchboardStore` | library | SQLite log, retention, export | GRDB |
+| `SwitchboardStore` | library | SQLite log, retention, export | none (system SQLite) |
 | `SwitchboardRender` | library | Metal engine, layouts, picking, label atlas | none |
 | `SwitchboardApp` | executable | SwiftUI shell, panels, settings | — |
 
@@ -226,7 +226,7 @@ As built in M4, a name from a TLS handshake belongs to its one connection and wi
 
 ### 6.7 Capture discipline (Full mode)
 
-- Snap length 256 bytes for everything except TLS handshakes. Current browsers send ClientHellos larger than one segment with shuffled extensions, so the opening segments of a TLS flow are captured whole. The four ClientHellos seen in M0 all fit in one segment, but none came from a browser; M4 measures real browser traffic before the snap length is fixed. Packets are parsed in memory and discarded; nothing is written.
+- Snap length 256 bytes for everything except TLS handshakes. Current browsers send ClientHellos larger than one segment with shuffled extensions, so the opening segments of a TLS flow are captured whole. Measured in M4 on real traffic: 16 of 76 server names needed more than one segment, so the capture snap length is 2,048 bytes and handshakes are reassembled across segments. Packets are parsed in memory and discarded; nothing is written.
 - PKTAP cannot be filtered in the kernel, so every packet's first bytes reach the collector, which immediately discards all but what the parsers need: port 53, TCP SYN/FIN/RST, and the opening segments of TLS flows. Rates never depend on capture. The cost of this under sustained heavy traffic is measured in M4.
 - Kernel drop counts are surfaced in Health.
 
@@ -272,7 +272,7 @@ A process is identified by `(pid, startTime)` so PID reuse never merges two prog
 
 ### Log schema
 
-SQLite in WAL mode under `~/Library/Application Support/Switchboard/`, written only by the app.
+SQLite in WAL mode under `~/Library/Application Support/Switchboard/`, written only by the app. As built in M5 the process's name, user, and path are stored in each connection's row rather than in a separate table; the listing below is the original design, and the schema in use is in `SwitchboardStore`.
 
 ```sql
 CREATE TABLE process (

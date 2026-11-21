@@ -166,7 +166,7 @@ M4 and M5 are independent of each other and can proceed in parallel once M3 clos
 
 **Needs from the owner:** running the install script under `sudo`.
 
-**Status: built; packet capture not yet run as root.** Part one (daemon, protocol, automatic Full mode, install scripts) was run as root by the owner. Part two adds packet capture with DNS answers, TLS server names, and observed services, hostnames throughout the app, and a DNS panel; it is tested on synthetic packets and simulated names (124 tests) but live capture waits on another `sudo scripts/install.sh`. Packet-derived attribution of very short flows and clustering by domain are not built. Details in [spikes/M4-findings.md](spikes/M4-findings.md).
+**Status: built and run as root by the owner.** In Full mode on real traffic the collector read 44 DNS answers and 76 TLS server names from 20,583 packets with none dropped, and the app held 117 frames a second. One TLS name in five needed more than one segment. Still unmeasured: the collector's cost under heavy traffic, coverage against `netstat`, and refusal of non-administrators. Packet-derived attribution of very short flows and clustering by domain are not built. Details in [spikes/M4-findings.md](spikes/M4-findings.md).
 
 ---
 
@@ -191,6 +191,8 @@ M4 and M5 are independent of each other and can proceed in parallel once M3 clos
 - Export round-trips through `sqlite3` and `jq` checks.
 
 **Exit:** "every connection to this address in the last week" answers in under a second and replays in the graph.
+
+**Status: built; exit criterion met.** On seven simulated days (637,499 connections) that query takes 57 ms, and a moment from the log replays in the graph. Ten of eleven benchmark queries are under 200 ms; one is at 253 ms. The log uses the SQLite that ships with macOS rather than GRDB, so the project still has no third-party dependencies. 143 tests pass. The export dialog, the erase confirmation, and the first-seen ring have not been tried by hand. Details in [spikes/M5-findings.md](spikes/M5-findings.md).
 
 ---
 

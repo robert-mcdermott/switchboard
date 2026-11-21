@@ -212,6 +212,10 @@ public final class GraphController: @unchecked Sendable {
     private var scheme = PaletteScheme.standard
     private var keepEnded = false
     private var showNames = true
+    /// Destinations the log had never seen before, and the animation time each was noticed.
+    private var novel: [IPAddress: Float] = [:]
+    /// How long a never-seen-before destination keeps its ring.
+    public static let novelSeconds: Float = 90
     /// Connections that have ended, remembered while `keepsEnded` is on.
     private var ended: [FlowID: (flow: Flow, process: ProcessRecord?)] = [:]
 
@@ -288,6 +292,15 @@ public final class GraphController: @unchecked Sendable {
     public var showsHostnames: Bool {
         get { lock.withLock { showNames } }
         set { change { showNames = newValue } }
+    }
+
+    /// Marks destinations as never seen before in any earlier session. They carry a
+    /// bright ring for a while (docs/SPEC.md §9.4).
+    public func markFirstSeen(_ addresses: [IPAddress], time: Float) {
+        change {
+            for address in addresses { novel[address] = time }
+            if novel.count > 2000 { novel.removeAll() }
+        }
     }
 
     /// How many ended connections are being kept on screen.
@@ -374,6 +387,7 @@ public final class GraphController: @unchecked Sendable {
         var arrivals = self.arrivals
         let keepEnded = self.keepEnded
         let showNames = self.showNames
+        let novel = self.novel.filter { time - $0.value < Self.novelSeconds }
         var ended = self.ended
         let previous = Dictionary(uniqueKeysWithValues: nodes.map { ($0.id, $0) })
         lock.unlock()
@@ -560,6 +574,12 @@ public final class GraphController: @unchecked Sendable {
                 priority: aggregate.rate + Double(aggregate.bytes) * 1e-9)
             // A ring marks a node that stands for several addresses.
             if size > 1 { node.ring = SIMD4(color, 0.55) }
+            // A brighter one marks a destination this Mac has never talked to before.
+            if case .endpoint(let address) = id, novel[address] != nil {
+                node.ring = SIMD4(0.85, 1, 1, 1)
+                node.intensity = max(node.intensity, 0.9)
+                node.priority += 1e9
+            }
             built.append(node)
         }
 
@@ -631,6 +651,7 @@ public final class GraphController: @unchecked Sendable {
         nodeForAddress = nodeFor
         processCount = pids.count
         self.arrivals = remembered
+        self.novel = self.novel.filter { time - $0.value < Self.novelSeconds }
         // Unless the mode was switched off while this was being worked out.
         if self.keepEnded { self.ended = ended }
         nodes = built

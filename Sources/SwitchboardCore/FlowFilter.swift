@@ -477,3 +477,155 @@ private struct Parser {
         }
     }
 }
+
+// MARK: - SQL
+
+/// A value bound to a `?` in a prepared statement.
+public enum SQLBinding: Sendable, Equatable {
+    case text(String)
+    case integer(Int64)
+}
+
+extension FlowFilter {
+    /// A SQL condition that every matching logged flow satisfies, for narrowing a query
+    /// before the filter proper is applied in memory.
+    ///
+    /// It is deliberately allowed to let through too much and never too little: the
+    /// caller evaluates the real filter on every row SQL returns, so the result is
+    /// exactly what the live view would show. Terms SQL cannot express (networks, ages,
+    /// rates) are left out of the condition. Column names are those of the log's `flow`
+    /// table.
+    ///
+    /// `exact` is true when the condition means precisely what the filter means for rows
+    /// whose text is plain ASCII. Then SQL can count and summarise by itself, without
+    /// each row being rebuilt and checked.
+    public func sqlPrefilter() -> (clause: String, bindings: [SQLBinding], exact: Bool)? {
+        guard let root, let compiled = Self.compile(root) else { return nil }
+        return (compiled.sql, compiled.bindings, compiled.exact)
+    }
+
+    private struct Compiled {
+        var sql: String
+        var bindings: [SQLBinding]
+        /// True when the SQL means exactly what the node means, not merely no less.
+        var exact: Bool
+    }
+
+    private static func compile(_ node: Node) -> Compiled? {
+        switch node {
+        case .and(let a, let b):
+            // Either side alone still admits every match, so a side SQL cannot express is dropped.
+            switch (compile(a), compile(b)) {
+            case (let x?, let y?):
+                return Compiled(sql: "(\(x.sql) AND \(y.sql))", bindings: x.bindings + y.bindings, exact: x.exact && y.exact)
+            case (let x?, nil), (nil, let x?):
+                return Compiled(sql: x.sql, bindings: x.bindings, exact: false)
+            default:
+                return nil
+            }
+        case .or(let a, let b):
+            // Both sides are needed, or matches of the missing side would be lost.
+            guard let x = compile(a), let y = compile(b) else { return nil }
+            return Compiled(sql: "(\(x.sql) OR \(y.sql))", bindings: x.bindings + y.bindings, exact: x.exact && y.exact)
+        case .not(let inner):
+            // Negating something that admits too much would admit too little.
+            guard let x = compile(inner), x.exact else { return nil }
+            return Compiled(sql: "(NOT \(x.sql))", bindings: x.bindings, exact: true)
+        case .term(let term):
+            return compile(term)
+        }
+    }
+
+    private static func compile(_ term: Term) -> Compiled? {
+        switch term {
+        case .text(let field, let negated, let pattern):
+            let column: String
+            switch field {
+            case .process: column = "process"
+            case .user: column = "user"
+            case .path: column = "path"
+            case .proto: column = "proto"
+            case .service: column = "service"
+            case .direction: column = "direction"
+            case .iface: column = "iface"
+            case .host: column = "hostname"
+            // Whether a logged flow counts as closed depends on when you ask.
+            case .state: return nil
+            }
+            guard let (sql, binding) = like(column, pattern) else { return nil }
+            return Compiled(sql: negated ? "(NOT \(sql))" : sql, bindings: [binding], exact: true)
+
+        case .number(let field, let comparison, let value):
+            let symbol: String
+            switch comparison {
+            case .has, .equal: symbol = "="
+            case .notEqual: symbol = "!="
+            case .greater: symbol = ">"
+            case .greaterOrEqual: symbol = ">="
+            case .less: symbol = "<"
+            case .lessOrEqual: symbol = "<="
+            }
+            guard value.isFinite, abs(value) < 9e15, value == value.rounded() else { return nil }
+            let bound = SQLBinding.integer(Int64(value))
+            switch field {
+            case .pid: return Compiled(sql: "pid \(symbol) ?", bindings: [bound], exact: true)
+            case .r_port: return Compiled(sql: "r_port \(symbol) ?", bindings: [bound], exact: true)
+            case .l_port: return Compiled(sql: "l_port \(symbol) ?", bindings: [bound], exact: true)
+            case .port:
+                let joiner = comparison == .notEqual ? "AND" : "OR"
+                return Compiled(sql: "(r_port \(symbol) ? \(joiner) l_port \(symbol) ?)", bindings: [bound, bound], exact: true)
+            case .bytes: return Compiled(sql: "(bytes_in + bytes_out) \(symbol) ?", bindings: [bound], exact: true)
+            case .bytes_in: return Compiled(sql: "bytes_in \(symbol) ?", bindings: [bound], exact: true)
+            case .bytes_out: return Compiled(sql: "bytes_out \(symbol) ?", bindings: [bound], exact: true)
+            // Ages and rates depend on the moment of asking; left to the in-memory pass.
+            case .age, .rate, .rate_in, .rate_out, .rtt: return nil
+            }
+
+        case .address(let field, let negated, let pattern):
+            // Addresses are stored as text in canonical form, so only an exact one compares in SQL.
+            guard case .exactly(let address) = pattern else { return nil }
+            let column = field == .remote ? "r_ip" : "l_ip"
+            return Compiled(sql: "\(column) \(negated ? "!=" : "=") ?", bindings: [.text(address.description)], exact: true)
+
+        case .bare(let pattern):
+            var parts: [String] = []
+            var bindings: [SQLBinding] = []
+            for column in ["process", "r_ip", "service", "hostname"] {
+                guard let (sql, binding) = like(column, pattern) else { return nil }
+                parts.append(sql)
+                bindings.append(binding)
+            }
+            return Compiled(sql: "(" + parts.joined(separator: " OR ") + ")", bindings: bindings, exact: true)
+        }
+    }
+
+    /// `LIKE` ignores case for ASCII only, which matches how the filter compares as long
+    /// as the pattern itself is ASCII; anything else is left to the in-memory pass.
+    private static func like(_ column: String, _ pattern: TextPattern) -> (String, SQLBinding)? {
+        func escaped(_ text: String) -> String {
+            text.replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "%", with: "\\%")
+                .replacingOccurrences(of: "_", with: "\\_")
+        }
+        let column = "COALESCE(\(column), '')"
+        switch pattern {
+        case .contains(let needle):
+            guard needle.allSatisfy(\.isASCII) else { return nil }
+            return ("\(column) LIKE ? ESCAPE '\\'", .text("%" + escaped(needle) + "%"))
+        case .exactly(let wanted):
+            guard wanted.allSatisfy(\.isASCII) else { return nil }
+            return ("\(column) LIKE ? ESCAPE '\\'", .text(escaped(wanted)))
+        case .glob(let characters):
+            guard characters.allSatisfy(\.isASCII) else { return nil }
+            var like = ""
+            for character in characters {
+                switch character {
+                case "*": like += "%"
+                case "?": like += "_"
+                default: like += escaped(String(character))
+                }
+            }
+            return ("\(column) LIKE ? ESCAPE '\\'", .text(like))
+        }
+    }
+}

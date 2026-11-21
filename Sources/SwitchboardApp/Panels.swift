@@ -2,6 +2,7 @@ import Charts
 import SwiftUI
 import SwitchboardCore
 import SwitchboardRender
+import SwitchboardStore
 
 struct BottomPanel: View {
     @Bindable var model: AppModel
@@ -44,6 +45,9 @@ struct BottomPanel: View {
                 case .interfaces:
                     RankingList(title: "By network interface", talkers: model.interfaces, color: .signal)
                 case .dns: DNSPanel(model: model)
+                case .ages: AgesPanel(model: model)
+                case .firstSeen: FirstSeenPanel(model: model)
+                case .log: LogPanel(model: model)
                 case .listeners: ListenersPanel(model: model)
                 case .health: HealthPanel(model: model)
                 }
@@ -367,6 +371,166 @@ struct HealthPanel: View {
                 }
             }
             .font(.mono(11))
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+/// Searches everything Switchboard has recorded, with the same filter as the live view.
+struct LogPanel: View {
+    @Bindable var model: AppModel
+    @State private var moment = 0.0
+
+    var body: some View {
+        if !model.logAvailable {
+            Text(model.logNote)
+                .font(.mono(11))
+                .foregroundStyle(Color.dim)
+                .padding(12)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        } else {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 12) {
+                    Picker("Range", selection: $model.logRange) {
+                        ForEach(LogRange.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                    }
+                    .labelsHidden()
+                    .frame(width: 130)
+                    Text(model.logBusy ? "Searching…" : model.logSummary).foregroundStyle(Color.readout)
+                    Spacer()
+                    Text("log holds \(model.logStats.flows) connections · \(ByteFormat.bytes(Double(model.logStats.bytesOnDisk)))")
+                        .foregroundStyle(Color.dim)
+                    Toggle("Leave out hostnames", isOn: $model.redactExports).toggleStyle(.checkbox)
+                    Button("Export CSV") { model.exportLog(.csv) }
+                    Button("Export JSONL") { model.exportLog(.jsonl) }
+                    Button("Erase…") { model.purgeLog() }
+                }
+                .font(.mono(10))
+
+                if let span = model.logSpan, !model.logHistogram.isEmpty {
+                    Chart(Array(model.logHistogram.enumerated()), id: \.offset) { bucket in
+                        BarMark(
+                            x: .value("Time", Date(timeIntervalSince1970: span.lowerBound + (Double(bucket.offset) + 0.5) * (span.upperBound - span.lowerBound) / Double(model.logHistogram.count))),
+                            y: .value("Connections", bucket.element))
+                            .foregroundStyle(Color.signal.opacity(0.7))
+                    }
+                    .chartYAxis(.hidden)
+                    .chartXAxis {
+                        AxisMarks(values: .automatic(desiredCount: 8)) { _ in
+                            AxisValueLabel(format: .dateTime.day().hour().minute()).font(.mono(9))
+                        }
+                    }
+                    .frame(height: 54)
+
+                    // Drag to see the graph as it was at that moment.
+                    HStack(spacing: 8) {
+                        Text("Show in graph").foregroundStyle(Color.dim)
+                        Slider(value: $moment, in: span) { editing in
+                            if !editing { model.showLogMoment(moment) }
+                        }
+                        .controlSize(.mini)
+                        .accessibilityLabel("Moment to show from the log")
+                        Text(Date(timeIntervalSince1970: moment).formatted(date: .abbreviated, time: .standard))
+                            .foregroundStyle(model.logMoment == nil ? Color.dim : Color.caution)
+                            .frame(width: 170, alignment: .trailing)
+                    }
+                    .font(.mono(10))
+                    .onChange(of: span) { moment = span.upperBound }
+                    .onAppear { moment = span.upperBound }
+                }
+
+                Table(model.logRows) {
+                    TableColumn("Started") { Text($0.started.formatted(date: .abbreviated, time: .standard)) }.width(150)
+                    TableColumn("Lasted") { row in
+                        Text(row.ended == nil ? "open" : ByteFormat.duration(row.duration)).foregroundStyle(row.ended == nil ? Color.signal : Color.readout)
+                    }
+                    .width(70)
+                    TableColumn("Process") { Text($0.process) }
+                    TableColumn("PID") { Text(String($0.pid)) }.width(56)
+                    TableColumn("Destination") { Text($0.remote) }
+                    TableColumn("Port") { Text(String($0.port)) }.width(52)
+                    TableColumn("Service") { Text($0.service) }.width(80)
+                    TableColumn("↓ Total") { Text(ByteFormat.bytes($0.bytesIn)) }.width(76)
+                    TableColumn("↑ Total") { Text(ByteFormat.bytes($0.bytesOut)) }.width(76)
+                }
+                .font(.mono(11))
+                .scrollContentBackground(.hidden)
+            }
+            .padding(.horizontal, 10)
+            .padding(.top, 8)
+        }
+    }
+}
+
+/// Destinations this Mac had never talked to before this session.
+struct FirstSeenPanel: View {
+    @Bindable var model: AppModel
+
+    var body: some View {
+        if model.firstSeen.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Nothing new").font(.mono(12)).foregroundStyle(Color.readout)
+                Text(model.logAvailable
+                    ? "A destination is listed here, and ringed in the graph, the first time this Mac ever connects to it. That takes knowing what is normal, so nothing is flagged until the log has seen a couple of hundred destinations in earlier sessions."
+                    : "First-seen tracking uses the log. \(model.logNote)")
+                    .font(.mono(11))
+                    .foregroundStyle(Color.dim)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        } else {
+            Table(model.firstSeen) {
+                TableColumn("First seen") { Text($0.at.formatted(date: .omitted, time: .standard)) }.width(90)
+                TableColumn("Address") { Text($0.address) }
+                TableColumn("Hostname") { Text($0.host.isEmpty ? "–" : $0.host) }
+                TableColumn("Process") { Text($0.process) }
+            }
+            .font(.mono(11))
+            .scrollContentBackground(.hidden)
+        }
+    }
+}
+
+/// How long connections have been open, and which are old yet nearly silent.
+struct AgesPanel: View {
+    @Bindable var model: AppModel
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            VStack(alignment: .leading, spacing: 8) {
+                SectionTitle("Open connections by age")
+                let top = max(model.ages.map(\.count).max() ?? 0, 1)
+                ForEach(model.ages) { bucket in
+                    HStack(spacing: 10) {
+                        Text(bucket.label).foregroundStyle(Color.readout).frame(width: 110, alignment: .leading)
+                        GeometryReader { geometry in
+                            Rectangle().fill(Color.signal.opacity(0.75)).frame(width: geometry.size.width * CGFloat(bucket.count) / CGFloat(top))
+                        }
+                        .frame(height: 8)
+                        Text("\(bucket.count)").foregroundStyle(Color.dim).frame(width: 50, alignment: .trailing)
+                    }
+                    .font(.mono(11))
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Rectangle().fill(Color.hairline).frame(width: 1)
+
+            VStack(alignment: .leading, spacing: 8) {
+                SectionTitle("Open over an hour, under 100 KB")
+                if model.lingering.isEmpty {
+                    Text("None. A connection that stays open for hours while carrying almost nothing is worth a look; none match right now.")
+                        .font(.mono(11))
+                        .foregroundStyle(Color.dim)
+                }
+                ForEach(model.lingering) { row in
+                    Button { model.select(row: row) } label: { ConnectionSummary(row: row) }.buttonStyle(.plain)
+                }
+                Spacer(minLength: 0)
+            }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
         }

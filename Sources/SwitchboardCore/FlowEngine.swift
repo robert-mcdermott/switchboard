@@ -38,6 +38,18 @@ public struct EngineSnapshot: Sendable, Codable {
     public var processes: [ProcessRecord]
     /// The most recent DNS answers seen, oldest first.
     public var dns: [DNSRecord] = []
+
+    public init(
+        time: EngineTime, wallClock: Double, flows: [Flow], listeners: [Listener], processes: [ProcessRecord],
+        dns: [DNSRecord] = []
+    ) {
+        self.time = time
+        self.wallClock = wallClock
+        self.flows = flows
+        self.listeners = listeners
+        self.processes = processes
+        self.dns = dns
+    }
 }
 
 /// Turns socket observations into flows with lifecycle, rates, and attribution.

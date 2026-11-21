@@ -166,7 +166,14 @@ struct TimelineBar: View {
                 Spacer()
             }
 
-            if let scrub = model.scrubTime, let range = model.timeRange {
+            if model.logMoment != nil {
+                Text("FROM THE LOG · " + Date(timeIntervalSince1970: model.displayedWallClock).formatted(date: .abbreviated, time: .standard))
+                    .foregroundStyle(Color.caution)
+                Button("LIVE") { model.goLive() }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Color.signal)
+                    .help("Return to the present")
+            } else if let scrub = model.scrubTime, let range = model.timeRange {
                 Text(Date(timeIntervalSince1970: model.displayedWallClock).formatted(date: .omitted, time: .standard))
                     .foregroundStyle(Color.caution)
                 Text("−" + ByteFormat.duration(range.upperBound - scrub)).foregroundStyle(Color.caution)
