@@ -44,6 +44,7 @@ struct SettingsView: View {
     @AppStorage("profile") private var profile = "cinema"
     @AppStorage("hostnames") private var hostnames = "passive"
     @AppStorage("logging") private var logging = true
+    @AppStorage("tagLists") private var tagLists = ""
     @AppStorage("logDetail") private var logDetail = "standard"
     @AppStorage("logDays") private var logDays = 30.0
     @AppStorage("logMegabytes") private var logMegabytes = 2000.0
@@ -67,20 +68,38 @@ struct SettingsView: View {
             Section("Hostnames") {
                 Picker("Label destinations with", selection: $hostnames) {
                     Text("Hostnames where known").tag("passive")
+                    Text("Hostnames, looking up the rest").tag("active")
                     Text("Addresses only").tag("off")
                 }
-                Text("Names come from DNS answers and TLS handshakes the collector sees. Switchboard makes no lookups of its own.")
+                Text(hostnames == "active"
+                    ? "Switchboard will ask your DNS resolver for the name of each address nothing else has named. Those lookups are network traffic of its own, visible to your resolver, at most five a second."
+                    : "Names come from DNS answers and TLS handshakes the collector sees. Switchboard sends nothing itself.")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(hostnames == "active" ? .orange : .secondary)
             }
             Section("Graph") {
                 Picker("Group destinations by network", selection: $clustering) {
                     Text("When there are many").tag("automatic")
                     Text("Always").tag("subnet")
                     Text("Never").tag("off")
+                    Text("By network owner instead").tag("owner")
+                    Text("By country instead").tag("country")
                 }
                 Stepper("Group once past \(clusterThreshold) destinations", value: $clusterThreshold, in: 50...5000, step: 50)
                     .disabled(clustering != "automatic")
+            }
+            Section("Your address lists") {
+                TextEditor(text: $tagLists)
+                    .font(.system(size: 11, design: .monospaced))
+                    .frame(height: 70)
+                Text("One list per line, a colour optional:  office #5CF2A5: 10.0.0.0/8, 192.168.1.0/24\nDestinations on a list take its colour, and the filter field tag: finds them.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section("Location and network owner") {
+                Text("Country, city, and network owner come from database files in\n~/Library/Application Support/Switchboard/GeoIP. Switchboard never downloads them; run scripts/fetch-geoip.sh to fetch the free DB-IP Lite databases (IP Geolocation by DB-IP, CC BY 4.0), then restart.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             Section("History") {
                 Stepper("Keep \(Int(historyMinutes)) minutes for the timeline", value: $historyMinutes, in: 1...60, step: 1)

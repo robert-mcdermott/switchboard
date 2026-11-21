@@ -17,6 +17,8 @@ public enum CaptureObservation: Sendable, Equatable, Codable {
     case resolved(name: String, addresses: [IPAddress], pid: Int32?)
     /// The server name a TLS client sent on the connection between these endpoints.
     case serverName(proto: TransportProtocol, from: Endpoint, to: Endpoint, name: String)
+    /// The name a reverse lookup gave for an address.
+    case reverse(address: IPAddress, name: String)
     /// What the traffic between these endpoints was seen to be: `TLS`, `QUIC`, `DNS`.
     case service(proto: TransportProtocol, from: Endpoint, to: Endpoint, service: String)
 }

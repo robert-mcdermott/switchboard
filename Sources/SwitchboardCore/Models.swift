@@ -104,12 +104,21 @@ public struct Flow: Sendable, Codable, Identifiable {
     /// Which source this flow's attribution came from.
     public var attribution: String
 
+    // Where the remote address is and whose it is, when a database says.
+    public var country: String?
+    public var city: String?
+    public var asn: UInt32?
+    public var org: String?
+    /// The user's lists the remote address is on.
+    public var tags: [String]
+
     public init(
         id: FlowID, key: FlowKey, pid: Int32, direction: FlowDirection, interface: String?, state: FlowState,
         tcpState: TCPState?, firstSeen: EngineTime, lastSeen: EngineTime, lastActive: EngineTime, closedAt: EngineTime?,
         ageExact: Bool, bytesIn: UInt64, bytesOut: UInt64, packetsIn: UInt64, packetsOut: UInt64, rateIn: Double,
         rateOut: Double, rttMS: Double?, retransmittedBytes: UInt64?, service: String?, serviceBasis: ServiceBasis?,
-        hostname: String?, hostnameSource: NameSource? = nil, attribution: String
+        hostname: String?, hostnameSource: NameSource? = nil, attribution: String, country: String? = nil,
+        city: String? = nil, asn: UInt32? = nil, org: String? = nil, tags: [String] = []
     ) {
         self.id = id
         self.key = key
@@ -136,6 +145,11 @@ public struct Flow: Sendable, Codable, Identifiable {
         self.hostname = hostname
         self.hostnameSource = hostnameSource
         self.attribution = attribution
+        self.country = country
+        self.city = city
+        self.asn = asn
+        self.org = org
+        self.tags = tags
     }
 
     public var bytesTotal: UInt64 { bytesIn &+ bytesOut }
@@ -175,6 +189,8 @@ public struct ProcessRecord: Sendable, Codable, Identifiable, Hashable {
     /// Seconds since 1970.
     public var startTime: Double?
     public var signing: SigningStatus
+    /// The developer team that signed it, for Developer ID signatures.
+    public var teamID: String?
     /// Details beyond name and path were not readable without more privilege.
     public var restricted: Bool
 

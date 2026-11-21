@@ -42,6 +42,10 @@ final class LiveFeed: @unchecked Sendable {
     private let lock = NSLock()
     private var running = false
     private var foreground = true
+    // Set from the main thread, picked up by the feed thread on its next tick.
+    private var wantedEnricher: (any AddressEnricher)?
+    private var enricherChanged = false
+    private var activeLookups = false
     /// Synthetic or recorded traffic.
     let simulated: Bool
 
@@ -50,6 +54,9 @@ final class LiveFeed: @unchecked Sendable {
     private var engine: FlowEngine
     private var collector: CollectorClient?
     private var failures: [String] = []
+    private let trust = TrustCache()
+    /// Exists only while the user has chosen active lookups: nothing else here sends packets.
+    private var reverse: ReverseResolver?
 
     init(
         spec: String, flows: Int?, collectorPath: String, controller: GraphController,
@@ -91,6 +98,19 @@ final class LiveFeed: @unchecked Sendable {
         lock.withLock { self.foreground = foreground }
     }
 
+    /// Supplies location, network owner, and tags. Applied on the next tick.
+    func setEnricher(_ enricher: (any AddressEnricher)?) {
+        lock.withLock {
+            wantedEnricher = enricher
+            enricherChanged = true
+        }
+    }
+
+    /// Whether to ask the system resolver for names of addresses nothing else has named.
+    func setActiveLookups(_ on: Bool) {
+        lock.withLock { activeLookups = on }
+    }
+
     private func startSources() {
         failures = []
         for source in sources {
@@ -106,6 +126,7 @@ final class LiveFeed: @unchecked Sendable {
         collector = resolved.collector
         engine = FlowEngine(resolver: SourceSpec.resolver(for: resolved))
         engine.wallClockOrigin = origin
+        engine.enricher = lock.withLock { wantedEnricher }
         startSources()
     }
 
@@ -128,6 +149,20 @@ final class LiveFeed: @unchecked Sendable {
                 }
             }
 
+            let (newEnricher, changed, lookups) = lock.withLock { () -> ((any AddressEnricher)?, Bool, Bool) in
+                defer { enricherChanged = false }
+                return (wantedEnricher, enricherChanged, activeLookups)
+            }
+            if changed {
+                engine.enricher = newEnricher
+                engine.refreshEnrichment()
+            }
+            if lookups, !simulated {
+                if reverse == nil { reverse = ReverseResolver() }
+            } else {
+                reverse = nil
+            }
+
             let interval = lock.withLock { foreground } ? 0.5 : 1.0
             for case let source as NStatSource in sources where source.counterInterval != interval {
                 source.counterInterval = interval
@@ -137,6 +172,19 @@ final class LiveFeed: @unchecked Sendable {
                 engine.ingest(source.poll(now: now), from: source.name, at: now)
                 // Hostnames and observed services, where a source can supply them.
                 if let capture = source as? CaptureProvider { engine.observe(capture.pollCapture(now: now), at: now) }
+            }
+            // Signatures are checked in the background; results are picked up as they land.
+            if !simulated {
+                for process in engine.processes.values where process.signing == .unknown {
+                    guard let path = process.path, let verdict = trust.verdict(forPath: path) else { continue }
+                    engine.setSigning(pid: process.pid, status: verdict.status, teamID: verdict.teamID)
+                }
+            }
+            if let reverse {
+                for flow in engine.flows.values where flow.hostname == nil && flow.state != .closed {
+                    reverse.request(flow.key.remote.address)
+                }
+                engine.observe(reverse.pollCapture(now: now), at: now)
             }
             let snapshot = engine.snapshot()
             controller.update(snapshot, time: clock())

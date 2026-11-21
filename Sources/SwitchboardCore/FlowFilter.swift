@@ -46,7 +46,9 @@ public struct FlowFilter: Sendable, Equatable {
         ("l_port", "local port"), ("port", "either port"), ("rate", "total rate, e.g. 100KB/s"),
         ("rate_in", "receive rate"), ("rate_out", "send rate"), ("bytes", "total bytes, e.g. 10MB"),
         ("bytes_in", "bytes received"), ("bytes_out", "bytes sent"), ("age", "connection age, e.g. 1h"),
-        ("rtt", "round-trip time in ms"),
+        ("rtt", "round-trip time in ms"), ("country", "two-letter country code"), ("asn", "network number"),
+        ("org", "network owner"), ("class", "public, private, loopback, linklocal, cgnat, multicast"),
+        ("signing", "apple, developerid, adhoc, unsigned, invalid, unknown"), ("tag", "one of your address lists"),
     ]
 
     // MARK: - Syntax tree
@@ -72,11 +74,12 @@ public struct FlowFilter: Sendable, Equatable {
     }
 
     enum TextField: String, Sendable, CaseIterable {
-        case process, user, path, proto, service, state, direction, iface, host
+        case process, user, path, proto, service, state, direction, iface, host, country, org, signing, tag
+        case addressClass = "class"
     }
 
     enum NumberField: String, Sendable, CaseIterable {
-        case pid, r_port, l_port, port, rate, rate_in, rate_out, bytes, bytes_in, bytes_out, age, rtt
+        case pid, r_port, l_port, port, rate, rate_in, rate_out, bytes, bytes_in, bytes_out, age, rtt, asn
     }
 
     enum AddressField: String, Sendable, CaseIterable {
@@ -103,6 +106,13 @@ public struct FlowFilter: Sendable, Equatable {
                 case .direction: value = flow.direction.rawValue
                 case .iface: value = flow.interface ?? ""
                 case .host: value = flow.hostname ?? ""
+                case .country: value = flow.country ?? ""
+                case .org: value = flow.org ?? ""
+                case .signing: value = process?.signing.rawValue ?? SigningStatus.unknown.rawValue
+                case .addressClass: value = AddressClass(flow.key.remote.address).rawValue
+                case .tag:
+                    // True if any of the flow's tags matches; negated, if none does.
+                    return flow.tags.contains { pattern.matches($0) } != negated
                 }
                 return pattern.matches(value) != negated
 
@@ -136,6 +146,9 @@ public struct FlowFilter: Sendable, Equatable {
                     // A flow with no measurement satisfies nothing.
                     guard let rtt = flow.rttMS else { return false }
                     return compare(rtt)
+                case .asn:
+                    guard let asn = flow.asn else { return false }
+                    return compare(Double(asn))
                 }
 
             case .address(let field, let negated, let pattern):
@@ -426,7 +439,7 @@ private struct Parser {
     private static let aliases = [
         "r_ip": "remote", "ip": "remote", "dst": "remote", "l_ip": "local", "src": "local", "hostname": "host",
         "interface": "iface", "protocol": "proto", "name": "process", "bytes_total": "bytes", "rate_total": "rate",
-        "rport": "r_port", "lport": "l_port",
+        "rport": "r_port", "lport": "l_port", "cc": "country", "as": "asn", "signed": "signing", "trust": "signing",
     ]
 
     private static func address(_ value: String, field: String, at position: Int) throws(FilterError) -> FlowFilter.AddressPattern {
@@ -454,6 +467,8 @@ private struct Parser {
     /// A number with an optional unit: `100KB/s`, `10MB`, `1h`, `250ms`.
     private static func number(_ text: String, for field: FlowFilter.NumberField) -> Double? {
         var digits = text.lowercased()
+        // Network numbers are usually written AS15169.
+        if field == .asn, digits.hasPrefix("as") { digits.removeFirst(2) }
         if digits.hasSuffix("/s") { digits.removeLast(2) }
         var unit = ""
         while let last = digits.last, last.isLetter {
@@ -463,7 +478,7 @@ private struct Parser {
         guard let value = Double(digits), value.isFinite else { return nil }
 
         switch field {
-        case .pid, .r_port, .l_port, .port:
+        case .pid, .r_port, .l_port, .port, .asn:
             return unit.isEmpty ? value : nil
         case .rate, .rate_in, .rate_out, .bytes, .bytes_in, .bytes_out:
             let scale: [String: Double] = ["": 1, "b": 1, "kb": 1e3, "k": 1e3, "mb": 1e6, "m": 1e6, "gb": 1e9, "g": 1e9, "tb": 1e12]
@@ -549,6 +564,12 @@ extension FlowFilter {
             case .direction: column = "direction"
             case .iface: column = "iface"
             case .host: column = "hostname"
+            case .country: column = "country"
+            case .org: column = "org"
+            // Rows written before signatures were checked have none recorded: that is "unknown".
+            case .signing: column = "COALESCE(signing, 'unknown')"
+            // Tags and address classes are worked out from the address, not stored as one value.
+            case .tag, .addressClass: return nil
             // Whether a logged flow counts as closed depends on when you ask.
             case .state: return nil
             }
@@ -579,6 +600,9 @@ extension FlowFilter {
             case .bytes_out: return Compiled(sql: "bytes_out \(symbol) ?", bindings: [bound], exact: true)
             // Ages and rates depend on the moment of asking; left to the in-memory pass.
             case .age, .rate, .rate_in, .rate_out, .rtt: return nil
+            // An unknown network number is NULL in the log and matches no comparison; said
+            // outright, so that a NOT around it comes out true as it does in memory.
+            case .asn: return Compiled(sql: "(asn IS NOT NULL AND asn \(symbol) ?)", bindings: [bound], exact: true)
             }
 
         case .address(let field, let negated, let pattern):

@@ -222,7 +222,7 @@ Port table first (IANA plus a curated list), upgraded by observation in Full mod
 | Passive (default in Full) | DNS answers and TLS SNI seen in capture | none |
 | Active | Passive plus `getnameinfo`, cached, rate-limited | Emits PTR queries; the toggle says so |
 
-As built in M4, a name from a TLS handshake belongs to its one connection and wins over DNS for it; a DNS answer names an address for the process that asked and, failing that, for anyone. Standalone mode has no passive source and Active lookups arrive in M6, so until then it shows addresses. Each hostname shows its source badge (`DNS`, `SNI`, `PTR`). SNI is read from TCP TLS only in v1; QUIC flows get names through DNS correlation. The UI states plainly when encrypted DNS, ECH, or Private Relay is limiting what can be seen.
+As built in M4, a name from a TLS handshake belongs to its one connection and wins over DNS for it; a DNS answer names an address for the process that asked and, failing that, for anyone. Standalone mode has no passive source, so it shows addresses unless Active is chosen. As built in M6, Active asks the system resolver for the name of each address nothing else has named, once per address and at most five a second, and such a name never replaces one from DNS or TLS. Each hostname shows its source badge (`DNS`, `SNI`, `PTR`). SNI is read from TCP TLS only in v1; QUIC flows get names through DNS correlation. The UI states plainly when encrypted DNS, ECH, or Private Relay is limiting what can be seen.
 
 ### 6.7 Capture discipline (Full mode)
 
@@ -270,9 +270,17 @@ Listener  pid, proto, address, port, exposed
 
 A process is identified by `(pid, startTime)` so PID reuse never merges two programs. Address classes: private, loopback, link-local, multicast, CGNAT, public.
 
+### Enrichment (as built in M6)
+
+Location and network owner come from MaxMind-format files in `~/Library/Application Support/Switchboard/GeoIP`, read by Switchboard's own reader. The app never downloads them; `scripts/fetch-geoip.sh` fetches the free DB-IP Lite files (attribution: IP Geolocation by DB-IP, CC BY 4.0). Only public addresses are looked up. The user's own address lists are text in Settings, one list per line: `office #5CF2A5: 10.0.0.0/8, 192.168.1.0/24`.
+
+A program's signature is one of Apple, Developer ID (which includes the App Store), ad hoc, unsigned, invalid, or unknown. Every architecture in the file is checked; resources are not re-hashed; no revocation check is made. "Invalid" means the signature was checked and failed, never that the file could not be read. The check runs in the app, in both modes.
+
+For text fields a missing value is the empty string, so `country!=US` matches a destination with no known country; `asn` comparisons match only where a number is known.
+
 ### Log schema
 
-SQLite in WAL mode under `~/Library/Application Support/Switchboard/`, written only by the app. As built in M5 the process's name, user, and path are stored in each connection's row rather than in a separate table; the listing below is the original design, and the schema in use is in `SwitchboardStore`.
+SQLite in WAL mode under `~/Library/Application Support/Switchboard/`, written only by the app. M6 added country, city, network number and owner, lists, signature, and team to each connection's row (layout version 2, upgraded in place). As built in M5 the process's name, user, and path are stored in each connection's row rather than in a separate table; the listing below is the original design, and the schema in use is in `SwitchboardStore`.
 
 ```sql
 CREATE TABLE process (

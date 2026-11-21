@@ -216,6 +216,8 @@ M4 and M5 are independent of each other and can proceed in parallel once M3 clos
 
 **Exit:** `country!=US signing:unsigned` works live and in the log.
 
+**Status: built; exit criterion met in tests, not yet with a real location database.** Signature verdicts agree with `codesign` for 710 of 711 installed programs (the last is one `codesign` cannot read), after fixing three faults that comparison exposed. The MMDB reader is tested on files the tests build, not on DB-IP's: `scripts/fetch-geoip.sh` is written and has to be run by the owner. No capture has confirmed that the app sends nothing with lookups off. 174 tests pass. Details in [spikes/M6-findings.md](spikes/M6-findings.md).
+
 ---
 
 ## M7 — Views and wall mode

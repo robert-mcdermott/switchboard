@@ -279,6 +279,10 @@ public enum Wire {
                 endpoint(from)
                 endpoint(to)
                 string(service)
+            case .reverse(let address, let name):
+                byte(3)
+                self.address(address)
+                string(name)
             }
         }
 
@@ -448,6 +452,8 @@ public enum Wire {
                 return .serverName(proto: try transport(), from: try endpoint(), to: try endpoint(), name: try string())
             case 2:
                 return .service(proto: try transport(), from: try endpoint(), to: try endpoint(), service: try string())
+            case 3:
+                return .reverse(address: try address(), name: try string())
             case let other:
                 throw .malformed("capture kind \(other)")
             }

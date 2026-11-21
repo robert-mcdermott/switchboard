@@ -14,6 +14,8 @@ enum SBCtl {
           sbctl verify                                     check the live engine against netstat and known traffic
           sbctl tap [--socket PATH] [--json] [--seconds N] watch what the collector publishes
           sbctl log stats | query | export | prune | purge  read and maintain the log (sbctl log for details)
+          sbctl geo <address>…                             location and network owner, from the local databases
+          sbctl trust <program>…                           who signed a program
 
           sources: nstat (default), nettop, nstat+nettop, collector[:socket], sim:<scenario>, trace:<file>
           scenarios: quiet, developer, stress, beacon, portscan
@@ -37,6 +39,8 @@ enum SBCtl {
             case "verify": return try VerifyCommand.run(options)
             case "tap": return try TapCommand.run(options)
             case "log": return try LogCommand.run(Array(arguments.dropFirst()))
+            case "geo": return EnrichCommand.geo(Array(arguments.dropFirst()))
+            case "trust": return EnrichCommand.trust(Array(arguments.dropFirst()))
             default: break
             }
         } catch {

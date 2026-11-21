@@ -8,6 +8,15 @@ public enum NodeID: Hashable, Sendable {
     case endpoint(IPAddress)
     /// Several addresses in one network, drawn as a single node.
     case network(IPAddress, bits: Int)
+    /// Destinations grouped by who owns their network, or by country.
+    case group(GroupKind, String)
+}
+
+public enum GroupKind: String, Hashable, Sendable {
+    /// Keyed by network number, as text.
+    case asn
+    /// Keyed by two-letter country code.
+    case country
 }
 
 public enum PickTarget: Hashable, Sendable {
@@ -29,6 +38,10 @@ public enum Clustering: Sendable, Equatable {
     case subnet
     /// Merge only once there are more destinations than this.
     case automatic(threshold: Int)
+    /// One node per network owner. Needs an ASN database.
+    case owner
+    /// One node per country. Needs a location database.
+    case country
 }
 
 /// What the tooltip and inspector show for a node or edge.
@@ -195,6 +208,7 @@ public final class GraphController: @unchecked Sendable {
     private var nodeAggregates: [NodeID: Aggregate] = [:]
     private var edgeAggregates: [EdgeKey: Aggregate] = [:]
     private var networkMembers: [NodeID: [IPAddress]] = [:]
+    private var groupLabels: [NodeID: String] = [:]
     private var nodeForAddress: [IPAddress: NodeID] = [:]
     private var processes: [Int32: ProcessRecord] = [:]
     private var listeners: [Int32: [Listener]] = [:]
@@ -212,6 +226,7 @@ public final class GraphController: @unchecked Sendable {
     private var scheme = PaletteScheme.standard
     private var keepEnded = false
     private var showNames = true
+    private var tagColors: [String: SIMD3<Float>] = [:]
     /// Destinations the log had never seen before, and the animation time each was noticed.
     private var novel: [IPAddress: Float] = [:]
     /// How long a never-seen-before destination keeps its ring.
@@ -303,6 +318,11 @@ public final class GraphController: @unchecked Sendable {
         }
     }
 
+    /// Colours for the user's address lists; a destination on a coloured list takes its colour.
+    public func setTagColors(_ colors: [String: SIMD3<Float>]) {
+        change { tagColors = colors }
+    }
+
     /// How many ended connections are being kept on screen.
     public var endedCount: Int { lock.withLock { ended.count } }
 
@@ -313,12 +333,16 @@ public final class GraphController: @unchecked Sendable {
 
     /// Opens a network node into its individual addresses, or closes it again.
     public func toggleExpansion(of node: NodeID) {
+        // An address may have come out of its owner's or its country's node rather than a network.
+        let example = flows(for: .node(node)).first
         change {
             switch node {
-            case .network:
+            case .network, .group:
                 expanded.insert(node)
             case .endpoint(let address):
                 expanded.remove(Self.network(of: address))
+                if let asn = example?.asn { expanded.remove(.group(.asn, "\(asn)")) }
+                if let country = example?.country { expanded.remove(.group(.country, country)) }
             default:
                 break
             }
@@ -387,6 +411,7 @@ public final class GraphController: @unchecked Sendable {
         var arrivals = self.arrivals
         let keepEnded = self.keepEnded
         let showNames = self.showNames
+        let tagColors = self.tagColors
         let novel = self.novel.filter { time - $0.value < Self.novelSeconds }
         var ended = self.ended
         let previous = Dictionary(uniqueKeysWithValues: nodes.map { ($0.id, $0) })
@@ -460,9 +485,32 @@ public final class GraphController: @unchecked Sendable {
         case .off: clusteringActive = false
         case .subnet: clusteringActive = true
         case .automatic(let threshold): clusteringActive = byAddress.count > threshold
+        case .owner, .country: clusteringActive = false
         }
         var nodeFor: [IPAddress: NodeID] = [:]
         var members: [NodeID: [IPAddress]] = [:]
+        var groupLabels: [NodeID: String] = [:]
+        if clusteringMode == .owner || clusteringMode == .country {
+            // Every destination the database knows about joins its owner's or country's
+            // node; the rest stay as they are.
+            for (address, aggregate) in byAddress {
+                guard let flow = aggregate.flows.first else { continue }
+                let id: NodeID
+                if clusteringMode == .owner {
+                    guard let asn = flow.asn else { continue }
+                    id = .group(.asn, "\(asn)")
+                    groupLabels[id] = flow.org.map { "\($0) (AS\(asn))" } ?? "AS\(asn)"
+                } else {
+                    guard let country = flow.country else { continue }
+                    id = .group(.country, country)
+                    groupLabels[id] = Locale.current.localizedString(forRegionCode: country).map { "\($0) (\(country))" } ?? country
+                }
+                guard !expanded.contains(id) else { continue }
+                nodeFor[address] = id
+                members[id, default: []].append(address)
+            }
+            for id in members.keys { members[id]?.sort(by: Self.addressOrder) }
+        }
         if clusteringActive {
             for (network, addresses) in Dictionary(grouping: byAddress.keys, by: Self.network(of:))
             where addresses.count >= 2 && !expanded.contains(network) {
@@ -527,8 +575,14 @@ public final class GraphController: @unchecked Sendable {
                 intensity: (0.34 + 0.5 * Self.level(aggregate.rate, scale: 6.5) * Float(aggregate.life)) * Float(0.45 + 0.55 * aggregate.life),
                 bornAt: born(id), label: Self.clip(record?.name ?? "pid \(pid)", to: 22),
                 priority: 1e15 + aggregate.rate, iconPath: record?.path)
-            // A process listening on a non-loopback address is reachable from outside.
-            if exposed { node.ring = SIMD4(scheme.remoteAccess, 0.85) }
+            // The ring is the trust signal (docs/SPEC.md §9.4): red for a program that is
+            // unsigned or whose signature does not verify, amber for one signed by nobody
+            // in particular or listening where other machines can reach it.
+            switch record?.signing {
+            case .unsigned, .invalid: node.ring = SIMD4(Palette.attention, 1)
+            case .adHoc: node.ring = SIMD4(scheme.remoteAccess, 0.85)
+            default: if exposed { node.ring = SIMD4(scheme.remoteAccess, 0.85) }
+            }
             built.append(node)
         }
 
@@ -554,6 +608,7 @@ public final class GraphController: @unchecked Sendable {
             switch id {
             case .network(let address, let bits): text = "\(address)/\(bits)"
             case .endpoint(let address): text = address.description
+            case .group: text = groupLabels[id] ?? ""
             default: text = ""
             }
             let fan = min(1.5, sector * 0.85 + 0.05 * count.squareRoot())
@@ -562,7 +617,11 @@ public final class GraphController: @unchecked Sendable {
             farthest = max(farthest, radius)
             let anchor = SIMD2(cos(angle), sin(angle)) * radius
             let start = previous[.process(ownerPID)]?.position ?? SIMD2(cos(angle), sin(angle)) * ringRadius
-            let color = scheme.color(forService: aggregate.service)
+            // A destination on one of the user's coloured lists takes that colour.
+            let tagged = aggregate.flows.first?.tags.compactMap { tagColors[$0] }.first
+            let color = tagged ?? scheme.color(forService: aggregate.service)
+            let isGroup: Bool
+            if case .group = id { isGroup = true } else { isGroup = false }
             var node = Node(
                 id: id, position: previous[id]?.position ?? start, anchor: anchor,
                 radius: 2.6 + 6 * Self.level(Double(aggregate.bytes), scale: 9) + (size > 1 ? 2 + min(4, log2(Float(size))) : 0),
@@ -570,10 +629,10 @@ public final class GraphController: @unchecked Sendable {
                 intensity: (0.3 + 0.7 * Self.level(aggregate.rate, scale: 6.5)) * Float(max(aggregate.life, 0.15)),
                 // Placement is seeded from the address, so naming a node never moves it.
                 bornAt: born(id),
-                label: size > 1 ? "\(text) ×\(size)" : (showNames ? aggregate.name.map { Self.clip($0, to: 36) } : nil) ?? text,
+                label: isGroup ? "\(Self.clip(text, to: 34)) ×\(size)" : (size > 1 ? "\(text) ×\(size)" : (showNames ? aggregate.name.map { Self.clip($0, to: 36) } : nil) ?? text),
                 priority: aggregate.rate + Double(aggregate.bytes) * 1e-9)
             // A ring marks a node that stands for several addresses.
-            if size > 1 { node.ring = SIMD4(color, 0.55) }
+            if size > 1 || isGroup { node.ring = SIMD4(color, 0.55) }
             // A brighter one marks a destination this Mac has never talked to before.
             if case .endpoint(let address) = id, novel[address] != nil {
                 node.ring = SIMD4(0.85, 1, 1, 1)
@@ -608,6 +667,7 @@ public final class GraphController: @unchecked Sendable {
             switch key.to {
             case .endpoint(let address): far = address.description
             case .network(let address, let bits): far = "\(address)/\(bits)"
+            case .group(let kind, let key): far = "\(kind.rawValue) \(key)"
             default: far = ""
             }
             let seed = "\(pid) \(far)"
@@ -648,6 +708,7 @@ public final class GraphController: @unchecked Sendable {
         nodeAggregates = aggregates
         edgeAggregates = allEdges
         networkMembers = members
+        self.groupLabels = groupLabels
         nodeForAddress = nodeFor
         processCount = pids.count
         self.arrivals = remembered
@@ -684,6 +745,11 @@ public final class GraphController: @unchecked Sendable {
             switch id {
             case .host: return (0, 0, 0, 0, 0)
             case .process(let pid): return (1, 0, 0, UInt64(UInt32(bitPattern: pid)), 0)
+            case .group(let kind, let key):
+                // After every address, in a fixed order of their own.
+                var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+                for byte in "\(kind.rawValue) \(key)".utf8 { hash = (hash ^ UInt64(byte)) &* 0x100_0000_01b3 }
+                return (3, 0, 0, hash, 0)
             case .endpoint(let address), .network(let address, _):
                 let isNetwork: Int
                 if case .network = id { isNetwork = 1 } else { isNetwork = 0 }
@@ -960,7 +1026,7 @@ public final class GraphController: @unchecked Sendable {
             let users = Set(aggregate.flows.map(\.pid)).sorted().map(name)
             var rows = trafficRows(aggregate)
             rows.insert(.init(label: "Used by", value: Self.list(users)), at: 0)
-            rows.insert(contentsOf: nameRows(aggregate), at: 0)
+            rows.insert(contentsOf: nameRows(aggregate) + Self.placeRows(aggregate), at: 0)
             return HoverInfo(
                 title: aggregate.name ?? address.description,
                 subtitle: aggregate.name == nil ? Self.classification(address) : "\(address) · \(Self.classification(address))",
@@ -975,6 +1041,19 @@ public final class GraphController: @unchecked Sendable {
             rows.insert(contentsOf: nameRows(aggregate), at: 2)
             return HoverInfo(
                 title: "\(address)/\(bits)", subtitle: "\(addresses.count) addresses in one network · \(Self.classification(address))",
+                rows: rows, footnote: "Right-click to expand into separate addresses")
+
+        case .node(.group(let kind, let key)):
+            let id = NodeID.group(kind, key)
+            let addresses = networkMembers[id] ?? []
+            let users = Set(aggregate.flows.map(\.pid)).sorted().map(name)
+            var rows = trafficRows(aggregate)
+            rows.insert(.init(label: "Used by", value: Self.list(users)), at: 0)
+            rows.insert(.init(label: "Addresses", value: Self.list(addresses.map(\.description), limit: 3)), at: 1)
+            rows.insert(contentsOf: nameRows(aggregate), at: 2)
+            return HoverInfo(
+                title: groupLabels[id] ?? key,
+                subtitle: "\(addresses.count) addresses · grouped by \(kind == .asn ? "network owner" : "country")",
                 rows: rows, footnote: "Right-click to expand into separate addresses")
 
         case .edge(.process(let from), .process(let to)):
@@ -1001,6 +1080,9 @@ public final class GraphController: @unchecked Sendable {
             case .network(let address, let bits):
                 far = "\(address)/\(bits)"
                 kind = Self.classification(address)
+            case .group(let groupKind, let key):
+                far = groupLabels[.group(groupKind, key)] ?? key
+                kind = groupKind == .asn ? "network owner" : "country"
             case .endpoint(let address):
                 far = aggregate.name ?? address.description
                 kind = aggregate.name == nil ? Self.classification(address) : "\(address) · \(Self.classification(address))"
@@ -1008,7 +1090,7 @@ public final class GraphController: @unchecked Sendable {
                 far = "?"
                 kind = ""
             }
-            rows.insert(contentsOf: nameRows(aggregate), at: 0)
+            rows.insert(contentsOf: nameRows(aggregate) + Self.placeRows(aggregate), at: 0)
             return HoverInfo(title: "\(name(pid)) → \(far)", subtitle: "pid \(pid) · \(kind)", rows: rows, footnote: nil)
 
         default:
@@ -1023,6 +1105,18 @@ public final class GraphController: @unchecked Sendable {
         rows.append(.init(label: "User", value: record?.username ?? record?.uid.map { "uid \($0)" } ?? "–"))
         if let parent = record?.parentPID {
             rows.append(.init(label: "Parent", value: "\(processes[parent]?.name ?? "pid") \(parent)"))
+        }
+        if let record {
+            let signed: String
+            switch record.signing {
+            case .apple: signed = "Apple"
+            case .developerID: signed = "an identified developer" + (record.teamID.map { " (team \($0))" } ?? "")
+            case .adHoc: signed = "ad hoc — signed, but by no one in particular"
+            case .unsigned: signed = "UNSIGNED"
+            case .invalid: signed = "INVALID — the signature does not verify"
+            case .unknown: signed = "not checked yet"
+            }
+            rows.append(.init(label: "Signed by", value: signed))
         }
         rows.append(contentsOf: trafficRows(aggregate))
         let remotes = Set(aggregate.flows.map(\.key.remote.address))
@@ -1053,6 +1147,19 @@ public final class GraphController: @unchecked Sendable {
         case .ptr: "reverse lookup"
         case nil: "source unknown"
         }
+    }
+
+    /// Where a destination is and whose network it is on, when a database says.
+    private static func placeRows(_ aggregate: Aggregate) -> [HoverInfo.Row] {
+        guard let flow = aggregate.flows.first else { return [] }
+        var rows: [HoverInfo.Row] = []
+        if let country = flow.country {
+            let name = Locale.current.localizedString(forRegionCode: country) ?? country
+            rows.append(.init(label: "Location", value: flow.city.map { "\($0), \(name)" } ?? name))
+        }
+        if let asn = flow.asn { rows.append(.init(label: "Network", value: flow.org.map { "\($0) (AS\(asn))" } ?? "AS\(asn)")) }
+        if !flow.tags.isEmpty { rows.append(.init(label: "On your lists", value: list(flow.tags))) }
+        return rows
     }
 
     private func trafficRows(_ aggregate: Aggregate) -> [HoverInfo.Row] {
@@ -1093,20 +1200,7 @@ public final class GraphController: @unchecked Sendable {
     }
 
     private static func classification(_ address: IPAddress) -> String {
-        if address.isLoopback { return "loopback" }
-        switch address {
-        case .v4(let value):
-            let a = value >> 24, b = (value >> 16) & 0xff
-            if a == 10 || (a == 172 && (16...31).contains(b)) || (a == 192 && b == 168) { return "private network" }
-            if a == 169 && b == 254 { return "link-local" }
-            if a == 100 && (64...127).contains(b) { return "carrier-grade NAT" }
-            if a >= 224 { return "multicast" }
-        case .v6(let hi, _):
-            if hi >> 57 == 0x7e { return "private network" }
-            if hi >> 54 == 0x3fa { return "link-local" }
-            if hi >> 56 == 0xff { return "multicast" }
-        }
-        return "public address"
+        AddressClass(address).label
     }
 
     /// 0 at nothing, 1 at `10^scale`, logarithmic in between.

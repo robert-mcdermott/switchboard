@@ -30,6 +30,8 @@ struct ConnectionRow: Identifiable, Sendable {
     /// Milliseconds, or -1 when there is no measurement.
     var rtt: Double
     var interface: String
+    var country: String
+    var owner: String
     var key: FlowKey
 
     init(_ flow: Flow, process record: ProcessRecord?, now: EngineTime) {
@@ -58,6 +60,8 @@ struct ConnectionRow: Identifiable, Sendable {
         bytesOut = Double(flow.bytesOut)
         rtt = flow.rttMS ?? -1
         interface = flow.interface ?? "–"
+        country = flow.country ?? ""
+        owner = flow.org ?? flow.asn.map { "AS\($0)" } ?? ""
         key = flow.key
     }
 }
@@ -95,6 +99,16 @@ struct FirstSeenRow: Identifiable, Sendable {
     var host: String
     var process: String
     var at: Date
+}
+
+/// A process on the network that Apple does not vouch for.
+struct TrustRow: Identifiable, Sendable {
+    var id: Int { pid }
+    var pid: Int
+    var process: String
+    var signing: SigningStatus
+    var path: String
+    var connections: Int
 }
 
 struct AgeBucket: Identifiable, Sendable {
@@ -144,7 +158,7 @@ struct ThroughputSample: Identifiable, Sendable {
 }
 
 enum PanelTab: String, CaseIterable, Sendable {
-    case connections, talkers, throughput, mix, interfaces, dns, ages, firstSeen, listeners, log, health
+    case connections, talkers, throughput, mix, interfaces, dns, ages, firstSeen, trust, listeners, log, health
 
     var title: String {
         switch self {
@@ -156,6 +170,7 @@ enum PanelTab: String, CaseIterable, Sendable {
         case .dns: "DNS"
         case .ages: "Ages"
         case .firstSeen: "First Seen"
+        case .trust: "Trust"
         case .log: "Log"
         case .listeners: "Listening"
         case .health: "Health"
@@ -231,6 +246,11 @@ final class AppModel {
     private(set) var ages: [AgeBucket] = []
     private(set) var lingering: [ConnectionRow] = []
     private(set) var firstSeen: [FirstSeenRow] = []
+    private(set) var trust: [TrustRow] = []
+    private(set) var uncheckedProcesses = 0
+    /// What location and ownership data is loaded, for Health and Settings.
+    private(set) var geoStatus = ""
+    private(set) var tagProblems: [String] = []
 
     // The log.
     private(set) var logAvailable = false
@@ -265,6 +285,8 @@ final class AppModel {
     @ObservationIgnored private var scrubRequest: Double?
     @ObservationIgnored private var logMomentRequest: Double?
     @ObservationIgnored private var derivation = 0
+    @ObservationIgnored private var loadedTags = ""
+    @ObservationIgnored private var enrichmentLoaded = false
     @ObservationIgnored private var store: LogStore?
     @ObservationIgnored private var logQuery = 0
     @ObservationIgnored private var lastPrune = Date.distantPast
@@ -333,6 +355,8 @@ final class AppModel {
             self.feed = feed
             feed.start()
             feed.setForeground(NSApplication.shared.isActive)
+            // The settings were applied before the feed existed; apply what concerns it now.
+            applySettings()
         } catch {
             failure = "\(error)"
         }
@@ -417,7 +441,11 @@ final class AppModel {
         let threshold = defaults.object(forKey: "clusterThreshold") as? Int ?? 300
         applyClustering(defaults.string(forKey: "clustering") ?? "automatic", threshold: threshold)
         session.controller.palette = defaults.string(forKey: "palette").flatMap(PaletteScheme.init(rawValue:)) ?? .standard
-        session.controller.showsHostnames = (defaults.string(forKey: "hostnames") ?? "passive") != "off"
+        let hostnames = defaults.string(forKey: "hostnames") ?? "passive"
+        session.controller.showsHostnames = hostnames != "off"
+        // Only "active" makes Switchboard send anything itself: reverse lookups through the system resolver.
+        feed?.setActiveLookups(hostnames == "active")
+        loadEnrichment()
         let minutes = defaults.object(forKey: "historyMinutes") as? Double ?? 15
         window.maximumAge = max(minutes, 1) * 60
     }
@@ -426,8 +454,39 @@ final class AppModel {
         switch mode {
         case "off": session.controller.clustering = .off
         case "subnet": session.controller.clustering = .subnet
+        case "owner": session.controller.clustering = .owner
+        case "country": session.controller.clustering = .country
         default: session.controller.clustering = .automatic(threshold: max(threshold, 10))
         }
+    }
+
+    /// `~/Library/Application Support/Switchboard/GeoIP`, where `.mmdb` files are looked for.
+    static var geoDirectory: URL {
+        LogStore.defaultURL().deletingLastPathComponent().appendingPathComponent("GeoIP")
+    }
+
+    /// Loads location databases and the user's address lists, and hands them to the engine.
+    private func loadEnrichment() {
+        let text = UserDefaults.standard.string(forKey: "tagLists") ?? ""
+        guard text != loadedTags || !enrichmentLoaded else { return }
+        loadedTags = text
+        enrichmentLoaded = true
+        let parsed = TagList.parse(text)
+        tagProblems = parsed.problems
+        let loaded = GeoDatabase.load(directory: Self.geoDirectory, tags: parsed.lists)
+        var colors: [String: SIMD3<Float>] = [:]
+        for list in parsed.lists {
+            guard let hex = list.color.flatMap({ UInt32($0.dropFirst(), radix: 16) }) else { continue }
+            colors[list.name] = SIMD3(Float((hex >> 16) & 0xff), Float((hex >> 8) & 0xff), Float(hex & 0xff)) / 255
+        }
+        session.controller.setTagColors(colors)
+        feed?.setEnricher(loaded.database.isEmpty ? nil : loaded.database)
+        if loaded.database.sources.isEmpty {
+            geoStatus = "No location database. Run scripts/fetch-geoip.sh to add one."
+        } else {
+            geoStatus = "Location data: " + loaded.database.sources.joined(separator: ", ")
+        }
+        if !loaded.problems.isEmpty { geoStatus += " · could not read " + loaded.problems.joined(separator: "; ") }
     }
 
     func setProfile(_ next: RenderProfile) {
@@ -483,6 +542,10 @@ final class AppModel {
         case .node(.process(let pid)), .edge(.host, .process(let pid)): "pid=\(pid)"
         case .node(.endpoint(let address)): "remote=\(address)"
         case .node(.network(let address, let bits)): "remote:\(address)/\(bits)"
+        case .node(.group(.asn, let key)): "asn=\(key)"
+        case .node(.group(.country, let key)): "country=\(key)"
+        case .edge(.process(let pid), .group(.asn, let key)): "pid=\(pid) asn=\(key)"
+        case .edge(.process(let pid), .group(.country, let key)): "pid=\(pid) country=\(key)"
         case .edge(.process(let from), .process): "pid=\(from) remote:127.0.0.0/8"
         case .edge(.process(let pid), .endpoint(let address)): "pid=\(pid) remote=\(address)"
         case .edge(.process(let pid), .network(let address, let bits)): "pid=\(pid) remote:\(address)/\(bits)"
@@ -799,6 +862,8 @@ final class AppModel {
         var dns: [DNSRow] = []
         var ages: [AgeBucket] = []
         var lingering: [ConnectionRow] = []
+        var trust: [TrustRow] = []
+        var unchecked = 0
 
         /// Runs off the main thread: on a busy machine this is tens of milliseconds, and
         /// on the main thread that is a dropped frame every second.
@@ -852,6 +917,24 @@ final class AppModel {
                 .sorted { $0.firstSeen < $1.firstSeen }
                 .prefix(30)
                 .map { ConnectionRow($0, process: processes[$0.pid], now: snapshot.time) }
+
+            // Processes on the network that are not Apple's and not from an identified developer.
+            let perProcess = Dictionary(grouping: open, by: \.pid).mapValues(\.count)
+            for process in snapshot.processes {
+                guard let count = perProcess[process.pid] else { continue }
+                switch process.signing {
+                case .apple, .developerID:
+                    continue
+                case .unknown:
+                    derived.unchecked += 1
+                case .adHoc, .unsigned, .invalid:
+                    derived.trust.append(TrustRow(
+                        pid: Int(process.pid), process: process.name, signing: process.signing, path: process.path ?? "–", connections: count))
+                }
+            }
+            // The most worrying first.
+            func rank(_ status: SigningStatus) -> Int { status == .invalid ? 0 : (status == .unsigned ? 1 : 2) }
+            derived.trust.sort { (rank($0.signing), $0.process, $0.pid) < (rank($1.signing), $1.process, $1.pid) }
 
             // Newest first, each with how many connections are using what it resolved to.
             var perAddress: [IPAddress: Int] = [:]
@@ -908,6 +991,8 @@ final class AppModel {
         dns = derived.dns
         ages = derived.ages
         lingering = derived.lingering
+        trust = derived.trust
+        uncheckedProcesses = derived.unchecked
         listeners = derived.listeners
         deriveInspector()
     }
@@ -998,6 +1083,10 @@ final class AppModel {
             "inspectorTitle": inspector?.title ?? "",
             "inspectorRows": inspectorRows.count,
             "scrubbedTo": scrubTime ?? -1,
+            "geoStatus": geoStatus,
+            "trustRows": trust.map { "\($0.process):\($0.signing.rawValue)" },
+            "unchecked": uncheckedProcesses,
+            "signingCounts": Dictionary(grouping: (latest?.processes ?? []), by: \.signing.rawValue).mapValues(\.count),
             "logAvailable": logAvailable,
             "logFlows": logStats.flows,
             "logRows": logRows.count,

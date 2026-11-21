@@ -47,6 +47,7 @@ struct BottomPanel: View {
                 case .dns: DNSPanel(model: model)
                 case .ages: AgesPanel(model: model)
                 case .firstSeen: FirstSeenPanel(model: model)
+                case .trust: TrustPanel(model: model)
                 case .log: LogPanel(model: model)
                 case .listeners: ListenersPanel(model: model)
                 case .health: HealthPanel(model: model)
@@ -151,6 +152,10 @@ struct ConnectionsPanel: View {
         .width(60).customizationID("rtt")
         TableColumn("Interface", value: \.interface) { (row: ConnectionRow) in Text(row.interface) }
             .width(70).customizationID("interface").defaultVisibility(.hidden)
+        TableColumn("Country", value: \.country) { (row: ConnectionRow) in Text(row.country.isEmpty ? "–" : row.country) }
+            .width(60).customizationID("country").defaultVisibility(.hidden)
+        TableColumn("Network owner", value: \.owner) { (row: ConnectionRow) in Text(row.owner.isEmpty ? "–" : row.owner) }
+            .customizationID("owner").defaultVisibility(.hidden)
         TableColumn("Local port", value: \.localPort) { (row: ConnectionRow) in Text(String(row.localPort)) }
             .width(70).customizationID("localPort").defaultVisibility(.hidden)
     }
@@ -353,6 +358,11 @@ struct HealthPanel: View {
                     }
                 }
                 VStack(alignment: .leading, spacing: 4) {
+                    SectionTitle("Enrichment")
+                    Text(model.geoStatus).foregroundStyle(Color.readout)
+                    ForEach(model.tagProblems, id: \.self) { Text("Address lists: \($0)").foregroundStyle(Color.caution) }
+                }
+                VStack(alignment: .leading, spacing: 4) {
                     SectionTitle("Engine")
                     Text("\(model.summary.flows) connections · \(model.summary.listeners) listening sockets (\(model.summary.exposed) exposed) · \(model.summary.processes) processes")
                         .foregroundStyle(Color.readout)
@@ -533,6 +543,53 @@ struct AgesPanel: View {
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+/// Programs on the network that Apple does not vouch for.
+struct TrustPanel: View {
+    @Bindable var model: AppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(summary).font(.mono(11)).foregroundStyle(Color.dim).padding(.horizontal, 12).padding(.top, 8)
+            if !model.trust.isEmpty {
+                Table(model.trust) {
+                    TableColumn("Signature") { row in
+                        Text(Self.label(row.signing)).foregroundStyle(row.signing == .adHoc ? Color.caution : Color.attention)
+                    }
+                    .width(110)
+                    TableColumn("Process") { Text($0.process) }
+                    TableColumn("PID") { Text(String($0.pid)) }.width(60)
+                    TableColumn("Connections") { Text(String($0.connections)) }.width(90)
+                    TableColumn("Path") { Text($0.path).truncationMode(.middle) }
+                }
+                .font(.mono(11))
+                .scrollContentBackground(.hidden)
+            } else {
+                Spacer()
+            }
+        }
+    }
+
+    private var summary: String {
+        if model.simulated { return "Signatures are not checked for simulated processes." }
+        var text = model.trust.isEmpty
+            ? "Every process on the network is signed by Apple or by an identified developer."
+            : "\(model.trust.count) processes on the network are not signed by Apple or an identified developer. Ad hoc is normal for software you built yourself or installed with a package manager; unsigned and invalid deserve a look."
+        if model.uncheckedProcesses > 0 { text += " \(model.uncheckedProcesses) not checked yet or not readable." }
+        return text
+    }
+
+    static func label(_ status: SigningStatus) -> String {
+        switch status {
+        case .adHoc: "ad hoc"
+        case .unsigned: "UNSIGNED"
+        case .invalid: "INVALID"
+        case .apple: "Apple"
+        case .developerID: "developer"
+        case .unknown: "unknown"
         }
     }
 }

@@ -127,7 +127,18 @@ public final class LogStore: @unchecked Sendable {
 
     private func migrate() throws {
         let version = try database.scalar("PRAGMA user_version")
-        guard version < 1 else { return }
+        if version < 1 { try createSchema() }
+        if version < 2 {
+            // Where each destination is, whose network it is on, which of the user's lists
+            // it is on, and how the process was signed.
+            for column in ["country TEXT", "city TEXT", "asn INTEGER", "org TEXT", "tags TEXT", "signing TEXT", "team TEXT"] {
+                try database.execute("ALTER TABLE flow ADD COLUMN \(column)")
+            }
+            try database.execute("CREATE INDEX flow_country ON flow(country); PRAGMA user_version = 2;")
+        }
+    }
+
+    private func createSchema() throws {
         // Must be set before the first table exists for space to be handed back later.
         try database.execute("PRAGMA auto_vacuum = INCREMENTAL")
         try database.execute("PRAGMA journal_mode = WAL")
@@ -183,14 +194,14 @@ public final class LogStore: @unchecked Sendable {
     private static let insertFlow = """
         INSERT INTO flow (pid, process, user, path, proto, l_ip, l_port, r_ip, r_port, direction, iface, service,
           service_basis, hostname, hostname_src, attribution, first_seen, last_seen, closed_at, age_exact,
-          bytes_in, bytes_out, pkts_in, pkts_out, ascii)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          bytes_in, bytes_out, pkts_in, pkts_out, ascii, country, city, asn, org, tags, signing, team)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
 
     private static let updateFlow = """
         UPDATE flow SET last_seen = ?, closed_at = ?, bytes_in = ?, bytes_out = ?, pkts_in = ?, pkts_out = ?,
           service = ?, service_basis = ?, hostname = ?, hostname_src = ?, iface = ?,
-          ascii = MIN(ascii, ?) WHERE id = ?
+          ascii = MIN(ascii, ?), country = ?, city = ?, asn = ?, org = ?, tags = ?, signing = ?, team = ? WHERE id = ?
         """
 
     private func write(_ snapshot: EngineSnapshot) throws -> [IPAddress] {
@@ -201,7 +212,7 @@ public final class LogStore: @unchecked Sendable {
 
         func insert(_ flow: Flow, closedAt: Double?) throws -> Int64 {
             let process = processes[flow.pid]
-            try database.run(Self.insertFlow, [
+            var values: [Database.Value] = [
                 .integer(Int64(flow.pid)), .init(process?.name), .init(process?.username), .init(process?.path),
                 .text(flow.key.proto.rawValue), .text(flow.key.local.address.description), .integer(Int64(flow.key.local.port)),
                 .text(flow.key.remote.address.description), .integer(Int64(flow.key.remote.port)),
@@ -211,8 +222,10 @@ public final class LogStore: @unchecked Sendable {
                 .integer(flow.ageExact ? 1 : 0),
                 .integer(Int64(clamping: flow.bytesIn)), .integer(Int64(clamping: flow.bytesOut)),
                 .integer(Int64(clamping: flow.packetsIn)), .integer(Int64(clamping: flow.packetsOut)),
-                .integer(Self.isASCII(process?.name, process?.username, process?.path, flow.service, flow.hostname, flow.interface) ? 1 : 0),
-            ])
+                .integer(Self.isASCII(process?.name, process?.username, process?.path, flow.service, flow.hostname, flow.interface, flow.org, flow.country) ? 1 : 0),
+            ]
+            values += Self.enrichment(flow, process)
+            try database.run(Self.insertFlow, values)
             let row = database.lastInsertedRow
             let address = flow.key.remote.address
             if !address.isLoopback,
@@ -224,14 +237,17 @@ public final class LogStore: @unchecked Sendable {
         }
 
         func update(_ flow: Flow, row: Int64, closedAt: Double?) throws {
-            try database.run(Self.updateFlow, [
+            var values: [Database.Value] = [
                 .real(closedAt ?? now), closedAt.map { .real($0) } ?? .null,
                 .integer(Int64(clamping: flow.bytesIn)), .integer(Int64(clamping: flow.bytesOut)),
                 .integer(Int64(clamping: flow.packetsIn)), .integer(Int64(clamping: flow.packetsOut)),
                 .init(flow.service), .init(flow.serviceBasis?.rawValue), .init(flow.hostname),
                 .init(flow.hostnameSource?.rawValue), .init(flow.interface),
-                .integer(Self.isASCII(flow.service, flow.hostname, flow.interface) ? 1 : 0), .integer(row),
-            ])
+                .integer(Self.isASCII(flow.service, flow.hostname, flow.interface, flow.org, flow.country) ? 1 : 0),
+            ]
+            values += Self.enrichment(flow, processes[flow.pid])
+            values.append(.integer(row))
+            try database.run(Self.updateFlow, values)
         }
 
         for flow in snapshot.flows {
@@ -316,11 +332,20 @@ public final class LogStore: @unchecked Sendable {
         texts.allSatisfy { $0?.utf8.allSatisfy { $0 < 0x80 } ?? true }
     }
 
+    private static func enrichment(_ flow: Flow, _ process: ProcessRecord?) -> [Database.Value] {
+        [
+            .init(flow.country), .init(flow.city), flow.asn.map { .integer(Int64($0)) } ?? .null, .init(flow.org),
+            flow.tags.isEmpty ? .null : .text(flow.tags.joined(separator: "\n")),
+            .init(process?.signing.rawValue), .init(process?.teamID),
+        ]
+    }
+
     // MARK: - Reading
 
     private static let columns = """
         id, pid, process, user, path, proto, l_ip, l_port, r_ip, r_port, direction, iface, service, service_basis,
-        hostname, hostname_src, attribution, first_seen, last_seen, closed_at, age_exact, bytes_in, bytes_out, pkts_in, pkts_out
+        hostname, hostname_src, attribution, first_seen, last_seen, closed_at, age_exact, bytes_in, bytes_out, pkts_in, pkts_out,
+        country, city, asn, org, tags, signing, team
         """
 
     private static func entry(_ row: Database.Row) -> LogEntry? {
@@ -345,8 +370,12 @@ public final class LogStore: @unchecked Sendable {
             rateIn: Double(bytesIn) / duration, rateOut: Double(bytesOut) / duration, rttMS: nil, retransmittedBytes: nil,
             service: row.text(12), serviceBasis: row.text(13).flatMap(ServiceBasis.init(rawValue:)),
             hostname: row.text(14), hostnameSource: row.text(15).flatMap(NameSource.init(rawValue:)),
-            attribution: row.text(16) ?? "")
-        let process = ProcessRecord(pid: pid, name: row.text(2) ?? "pid \(pid)", path: row.text(4), username: row.text(3))
+            attribution: row.text(16) ?? "", country: row.text(25), city: row.text(26),
+            asn: row.isNull(27) ? nil : UInt32(truncatingIfNeeded: row.integer(27)), org: row.text(28),
+            tags: row.text(29)?.split(separator: "\n").map(String.init) ?? [])
+        var process = ProcessRecord(pid: pid, name: row.text(2) ?? "pid \(pid)", path: row.text(4), username: row.text(3))
+        process.signing = row.text(30).flatMap(SigningStatus.init(rawValue:)) ?? .unknown
+        process.teamID = row.text(31)
         return LogEntry(flow: flow, process: process)
     }
 
@@ -525,6 +554,7 @@ public final class LogStore: @unchecked Sendable {
     public static let exportColumns = [
         "first_seen", "closed_at", "process", "pid", "user", "proto", "local_ip", "local_port", "remote_ip", "remote_port",
         "hostname", "hostname_source", "service", "direction", "interface", "bytes_in", "bytes_out", "packets_in", "packets_out",
+        "country", "city", "asn", "network_owner", "tags", "signing",
     ]
 
     /// Writes every match to `destination`. Returns how many were written.
@@ -555,12 +585,14 @@ public final class LogStore: @unchecked Sendable {
                     redactHostnames ? "" : (flow.hostname ?? ""), redactHostnames ? "" : (flow.hostnameSource?.rawValue ?? ""),
                     flow.service ?? "", flow.direction.rawValue, flow.interface ?? "",
                     "\(flow.bytesIn)", "\(flow.bytesOut)", "\(flow.packetsIn)", "\(flow.packetsOut)",
+                    flow.country ?? "", flow.city ?? "", flow.asn.map(String.init) ?? "", flow.org ?? "",
+                    flow.tags.joined(separator: " "), entry.process.signing == .unknown ? "" : entry.process.signing.rawValue,
                 ]
                 switch format {
                 case .csv:
                     pending.append(Data((values.map(Self.csvField).joined(separator: ",") + "\n").utf8))
                 case .jsonl:
-                    let numeric: Set<String> = ["pid", "local_port", "remote_port", "bytes_in", "bytes_out", "packets_in", "packets_out"]
+                    let numeric: Set<String> = ["pid", "local_port", "remote_port", "bytes_in", "bytes_out", "packets_in", "packets_out", "asn"]
                     var object: [String: Any] = [:]
                     for (name, value) in zip(Self.exportColumns, values) where !value.isEmpty {
                         object[name] = numeric.contains(name) ? (Int(value) ?? 0) as Any : value as Any

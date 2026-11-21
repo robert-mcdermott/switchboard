@@ -514,3 +514,146 @@ private func flow(pid: Int32, remote: String, port: UInt16 = 443, id: UInt64) ->
         #expect(controller.endedCount == GraphController.endedLimit)
     }
 }
+
+/// Two owners in two countries, and one address nothing is known about.
+private struct TwoOwners: AddressEnricher {
+    func facts(for address: IPAddress) -> AddressFacts {
+        var facts = AddressFacts()
+        guard case .v4(let value) = address else { return facts }
+        switch value >> 24 {
+        case 8:
+            facts.country = "US"
+            facts.city = "Mountain View"
+            facts.asn = 15169
+            facts.org = "Google LLC"
+        case 34:
+            facts.country = "IE"
+            facts.asn = 15169
+            facts.org = "Google LLC"
+        case 185:
+            facts.country = "IE"
+            facts.city = "Dublin"
+            facts.asn = 32934
+            facts.org = "Facebook Inc"
+        case 203:
+            facts.tags = ["watch"]
+        default:
+            break
+        }
+        return facts
+    }
+}
+
+@Suite struct EnrichmentSceneTests {
+    private func scene() -> (GraphController, FlowEngine) {
+        let engine = FlowEngine()
+        engine.enricher = TwoOwners()
+        let remotes = ["8.8.8.8", "8.8.4.4", "34.1.2.3", "185.60.216.35", "185.60.217.1", "203.0.113.9", "1.1.1.1"]
+        engine.ingest(remotes.enumerated().map { flow(pid: $0.offset < 5 ? 1 : 2, remote: $0.element, id: UInt64($0.offset + 1)) }, from: "test", at: 0)
+        let controller = GraphController()
+        controller.clustering = .off
+        controller.update(engine.snapshot(), time: 0)
+        controller.settle()
+        return (controller, engine)
+    }
+
+    /// The drawn node for an id, found the way the pointer finds it.
+    private static func node(_ id: NodeID, in controller: GraphController) -> NodeInstance? {
+        controller.frame(labelBudget: 0).nodes.first { controller.pick(at: $0.center, slack: 0.5) == .node(id) }
+    }
+
+    @Test func groupsDestinationsByWhoOwnsTheirNetwork() {
+        let (controller, _) = scene()
+        // Host, two processes, seven addresses.
+        #expect(controller.frame(labelBudget: 0).nodes.count == 10)
+
+        controller.clustering = .owner
+        let google = NodeID.group(.asn, "15169"), facebook = NodeID.group(.asn, "32934")
+        let frame = controller.frame(labelBudget: 20, highlights: [.node(google), .node(facebook)])
+        // Two owners, and the two addresses no database knows stay as they are.
+        #expect(frame.nodes.count == 7)
+        #expect(frame.labels.contains { $0.text == "Google LLC (AS15169) ×3" })
+        #expect(frame.labels.contains { $0.text == "Facebook Inc (AS32934) ×2" })
+        #expect(controller.flows(for: .node(google)).count == 3)
+        #expect(controller.flows(for: .edge(.process(1), facebook)).count == 2)
+        let info = controller.info(for: .node(google))
+        #expect(info?.title == "Google LLC (AS15169)")
+        #expect(info?.rows.contains { $0.label == "Used by" && $0.value == "app1" } == true)
+        #expect(controller.target(pid: 1, remote: Endpoint(address: IPAddress("34.1.2.3")!, port: 443), proto: .tcp) == .edge(.process(1), google))
+        #expect(controller.target(pid: 2, remote: Endpoint(address: IPAddress("1.1.1.1")!, port: 443), proto: .tcp)
+            == .edge(.process(2), .endpoint(IPAddress("1.1.1.1")!)))
+
+        // Expanding one owner brings its addresses back and leaves the other grouped.
+        controller.toggleExpansion(of: google)
+        #expect(controller.frame(labelBudget: 0).nodes.count == 9)
+        // Collapsing from any one of its addresses puts them all back.
+        controller.toggleExpansion(of: .endpoint(IPAddress("34.1.2.3")!))
+        #expect(controller.frame(labelBudget: 0).nodes.count == 7)
+    }
+
+    @Test func groupsDestinationsByCountry() {
+        let (controller, _) = scene()
+        controller.clustering = .country
+        // US holds two addresses, IE three across two owners.
+        #expect(controller.frame(labelBudget: 0).nodes.count == 7)
+        #expect(controller.flows(for: .node(.group(.country, "US"))).count == 2)
+        #expect(controller.flows(for: .node(.group(.country, "IE"))).count == 3)
+        #expect(controller.info(for: .node(.group(.country, "IE")))?.title.contains("IE") == true)
+        controller.clustering = .off
+        #expect(controller.frame(labelBudget: 0).nodes.count == 10)
+    }
+
+    @Test func saysWhereADestinationIsAndWhoseItIs() throws {
+        let (controller, _) = scene()
+        let dublin = try #require(controller.info(for: .node(.endpoint(IPAddress("185.60.216.35")!))))
+        // The country is spelled out in the reader's language.
+        #expect(dublin.rows.contains { $0.label == "Location" && $0.value.hasPrefix("Dublin, ") && $0.value.count > "Dublin, IE".count })
+        #expect(dublin.rows.contains { $0.label == "Network" && $0.value == "Facebook Inc (AS32934)" })
+        let listed = try #require(controller.info(for: .node(.endpoint(IPAddress("203.0.113.9")!))))
+        #expect(listed.rows.contains { $0.value == "watch" })
+        #expect(!listed.rows.contains { $0.label == "Location" })
+        let plain = try #require(controller.info(for: .node(.endpoint(IPAddress("1.1.1.1")!))))
+        #expect(!plain.rows.contains { $0.label == "Location" || $0.label == "Network" })
+    }
+
+    @Test func coloursADestinationOnOneOfTheUsersLists() throws {
+        let (controller, _) = scene()
+        func color(_ remote: String) throws -> SIMD4<Float> {
+            try #require(Self.node(.endpoint(IPAddress(remote)!), in: controller)).color
+        }
+        let before = try color("203.0.113.9")
+        #expect(before == (try color("1.1.1.1")))
+        controller.setTagColors(["watch": SIMD3(1, 0.25, 0.5)])
+        let after = try color("203.0.113.9")
+        #expect(simd_length(simd_normalize(SIMD3(after.x, after.y, after.z)) - simd_normalize(SIMD3<Float>(1, 0.25, 0.5))) < 0.01)
+        #expect(try color("1.1.1.1") == before)
+    }
+
+    @Test func ringsAProcessNobodyVouchesFor() throws {
+        let (controller, engine) = scene()
+        func ring(_ pid: Int32) throws -> SIMD4<Float> {
+            controller.update(engine.snapshot(), time: 1)
+            return try #require(Self.node(.process(pid), in: controller)).ring
+        }
+        func signedBy(_ pid: Int32) -> String? { controller.info(for: .node(.process(pid)))?.rows.first { $0.label == "Signed by" }?.value }
+
+        #expect(try ring(1).w == 0)
+        #expect(signedBy(1) == "not checked yet")
+        engine.setSigning(pid: 1, status: .apple, teamID: nil)
+        engine.setSigning(pid: 2, status: .developerID, teamID: "ABCDE12345")
+        #expect(try ring(1).w == 0 && ring(2).w == 0)
+        #expect(signedBy(1) == "Apple")
+        #expect(signedBy(2) == "an identified developer (team ABCDE12345)")
+
+        engine.setSigning(pid: 1, status: .adHoc, teamID: nil)
+        engine.setSigning(pid: 2, status: .unsigned, teamID: nil)
+        let amber = try ring(1), red = try ring(2)
+        #expect(amber.w > 0 && red.w == 1)
+        #expect(SIMD3(red.x, red.y, red.z) == Palette.attention)
+        #expect(SIMD3(amber.x, amber.y, amber.z) != Palette.attention)
+        #expect(signedBy(2) == "UNSIGNED")
+        engine.setSigning(pid: 2, status: .invalid, teamID: nil)
+        #expect(try ring(2) == red)
+        #expect(signedBy(2)?.hasPrefix("INVALID") == true)
+    }
+}

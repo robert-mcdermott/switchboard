@@ -60,6 +60,8 @@ public struct EngineSnapshot: Sendable, Codable {
 public final class FlowEngine {
     public var configuration: EngineConfiguration
     private let resolver: ProcessResolver
+    /// Supplies location, network owner, and tags for remote addresses, when set.
+    public var enricher: (any AddressEnricher)?
 
     public private(set) var flows: [FlowID: Flow] = [:]
     public private(set) var listeners: [FlowID: Listener] = [:]
@@ -268,6 +270,7 @@ public final class FlowEngine {
             rttMS: observation.rttMS, retransmittedBytes: observation.retransmittedBytes,
             service: service, serviceBasis: basis, hostname: named?.name, hostnameSource: named?.source,
             attribution: sourceKey.source)
+        if let enricher { Self.apply(enricher.facts(for: flowKey.remote.address), to: &flow) }
         if flow.tcpState?.isClosing == true { flow.state = .closing }
 
         var meter = Meters()
@@ -369,6 +372,32 @@ public final class FlowEngine {
             pid: observation.pid, name: observation.processName, uniqueID: observation.uniquePID)
     }
 
+    // MARK: - Enrichment
+
+    private static func apply(_ facts: AddressFacts, to flow: inout Flow) {
+        flow.country = facts.country
+        flow.city = facts.city
+        flow.asn = facts.asn
+        flow.org = facts.org
+        flow.tags = facts.tags
+    }
+
+    /// Looks every connection up again, after a database or the tag lists have changed.
+    public func refreshEnrichment() {
+        for id in flows.keys {
+            guard var flow = flows[id] else { continue }
+            // With no enricher, what an earlier one said is taken away again.
+            Self.apply(enricher?.facts(for: flow.key.remote.address) ?? AddressFacts(), to: &flow)
+            flows[id] = flow
+        }
+    }
+
+    /// Records the result of checking a process's code signature.
+    public func setSigning(pid: Int32, status: SigningStatus, teamID: String?) {
+        processes[pid]?.signing = status
+        processes[pid]?.teamID = teamID
+    }
+
     // MARK: - Names and services from packets
 
     /// Applies what packet capture learned: hostnames from DNS and TLS, and what the
@@ -412,6 +441,16 @@ public final class FlowEngine {
                     if namesByAddress[flow.key.remote.address] == nil {
                         namesByAddress[flow.key.remote.address] = (name, .sni)
                     }
+                }
+
+            case .reverse(let address, let name):
+                // A reverse lookup is the weakest kind of name: it only fills a gap.
+                guard !name.isEmpty, namesByAddress[address] == nil else { continue }
+                if namesByAddress.count >= Self.nameTableLimit { namesByAddress.removeAll() }
+                namesByAddress[address] = (name, .ptr)
+                for (id, flow) in flows where flow.hostname == nil && flow.key.remote.address == address {
+                    flows[id]?.hostname = name
+                    flows[id]?.hostnameSource = .ptr
                 }
 
             case .service(let proto, let from, let to, let service):
