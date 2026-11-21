@@ -8,7 +8,7 @@ Switchboard draws this Mac in the centre, the programs using the network around 
 
 It is built to be watched on a wall and to be useful at a desk.
 
-> **Status: pre-release.** Milestones 0 to 7 of 8 are built. It runs and is used daily on the author's machine, but it is not packaged, not notarised, and has only been run on macOS 27 on Apple silicon. See [docs/ROADMAP.md](docs/ROADMAP.md).
+> **Status: pre-release.** Milestones 0 to 7 of 8 are built, and the hardening of 8 is underway. It runs and is used daily on the author's machine, but it is not notarised, has no published release, and has only been run on macOS 27 on Apple silicon. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## What it shows
 
@@ -60,7 +60,7 @@ scripts/bundle.sh
 open build/Switchboard.app
 ```
 
-`bundle.sh` builds a release and assembles `build/Switchboard.app`, signed ad hoc. There is no Xcode project.
+`bundle.sh` builds a release and assembles `build/Switchboard.app`, signed ad hoc. There is no Xcode project. `scripts/release.sh` makes an unsigned zip with checksums; see the [guide](docs/GUIDE.md#installing) for opening one.
 
 To see it without touching your own traffic, run it on simulated data:
 
@@ -155,6 +155,13 @@ Some of the data comes from interfaces Apple does not document (the NetworkStati
 
 The full design is in [docs/SPEC.md](docs/SPEC.md). What was measured, and what was not, is written up per milestone in [docs/spikes](docs/spikes).
 
+## Documentation
+
+- [docs/GUIDE.md](docs/GUIDE.md): installing, using, and troubleshooting.
+- [docs/SPEC.md](docs/SPEC.md): the design.
+- [docs/ROADMAP.md](docs/ROADMAP.md): what is built and what is next.
+- [docs/spikes](docs/spikes): what each milestone measured, and what it did not.
+
 ## Tests
 
 ```bash
@@ -170,7 +177,7 @@ The second renders reference scenes and compares them with golden images.
 ## Known limits
 
 - Without the collector, roughly 5 to 8 percent of your own account's sockets are not reported by the system.
-- With the console panels open, the graph does not always hold 60 frames a second.
+- The app uses 12–17% of a core in the Operator profile, over its 10% budget.
 - The globe's coastlines are a coarse hand-drawn outline.
 - Kiosk mode has not had a long unattended run, and moving between displays is untested.
 - QUIC connections get names from DNS only, and encrypted DNS, ECH, and Private Relay all reduce what any observer on the machine can name.

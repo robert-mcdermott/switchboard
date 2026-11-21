@@ -459,13 +459,13 @@ Named workspaces save layout, panels, filters, and profile; three ship by defaul
 
 | Area | Budget |
 |---|---|
-| Launch to live graph | ≤ 2 s (measured 0.6–0.8 s) |
+| Launch to live graph | ≤ 2 s (measured 0.5–0.8 s in M8) |
 | Event to screen | Opens and closes ≤ 300 ms; byte counts ≤ 1 s |
 | Hover to tooltip | ≤ 1 frame |
-| Frame rate | 60 fps floor, 120 fps on ProMotion, at 5,000 nodes and 2,000 active edges. Measured in M2 at 2,051 nodes and 2,050 edges: 110 fps mean, worst frame 25 ms, so the floor is not yet held |
-| Engine CPU | < 1% idle (measured 0.85% with ~150 sockets at the 1 Hz default); < 3% with 2,000 sockets |
-| App CPU | < 10% in Operator profile at typical load |
-| Memory | Collector < 60 MB; app < 400 MB with a 1 h window |
+| Frame rate | 60 fps floor, 120 fps on ProMotion, at 5,000 nodes and 2,000 active edges. Measured in M8 with drawing on its own thread: Operator holds 60 fps with no frame over 16.7 ms at 5,129 nodes and 5,147 edges; Cinema holds 120 fps at 2,088 nodes and averages 109 fps at 5,129, where the GPU limits its slowest frames |
+| Engine CPU | < 1% idle (measured 0.11% live in M8); < 3% with 2,000 sockets (0.28% at 1,810 simulated) |
+| App CPU | < 10% in Operator profile at typical load (measured 12–17% in M8: not yet met) |
+| Memory | Collector < 60 MB (measured 11 MB); app < 400 MB with a 1 h window (279 MB footprint at five minutes in M8) |
 | Network impact | Zero in Off and Passive modes |
 
 Budgets are measured by `sbctl bench` and the simulator, not by eye, and are checked at every milestone.
@@ -497,7 +497,7 @@ scripts/bundle.sh
 open build/Switchboard.app
 ```
 
-`bundle.sh` assembles the `.app` (executable, `Info.plist`, icon, resources) and signs it ad hoc with `codesign -s -`. There is no Xcode project in the repository. Releases, if any, are unsigned zips with checksums and a documented `xattr` step; building from source is the primary path.
+`bundle.sh` assembles the `.app` (executable, `Info.plist`, icon, resources) and signs it ad hoc with `codesign -s -`. There is no Xcode project in the repository. Releases, if any, are unsigned zips with checksums and a documented `xattr` step; building from source is the primary path. `scripts/release.sh` (M8) makes one: it tests, builds, and zips the app, the collector, `sbctl`, the scripts, and the guide with SHA-256 checksums and the quarantine steps, and publishes nothing.
 
 GeoIP data is not bundled. `scripts/fetch-geoip.sh` is run by the user to download DB-IP Lite (CC BY, no account) and the app reads whatever `.mmdb` files it finds in Application Support.
 
