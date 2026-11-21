@@ -192,6 +192,8 @@ final class AppModel {
     let sourceSpec: String
     /// When set, the app measures itself for a few seconds, writes a report here, and quits.
     let measurePath: String?
+    /// Extra seconds to wait before measuring.
+    let measureSettle: Double
 
     var summary = LiveFeed.Summary()
     var frames = FrameStats.Summary()
@@ -316,6 +318,7 @@ final class AppModel {
         }
         sourceSpec = value("--source") ?? "nstat"
         measurePath = value("--measure")
+        measureSettle = value("--settle").flatMap(Double.init) ?? 0
 
         // Respect the system setting: no motion unless the user has said otherwise.
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion

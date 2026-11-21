@@ -273,3 +273,19 @@ private func node(_ id: NodeID, in controller: GraphController) -> NodeInstance?
         }
     }
 }
+
+@Suite struct EmptySceneTests {
+    @Test func drawsNothingBeforeTheFirstSceneWithoutFailing() {
+        // The render thread asks for frames from the moment the window opens, which on a
+        // slow first snapshot is before any scene exists.
+        for layout in GraphLayout.allCases {
+            let controller = GraphController()
+            controller.layout = layout
+            controller.advance(time: 1)
+            controller.step()
+            let frame = controller.frame(labelBudget: 50, highlights: [.node(.host)])
+            #expect(frame.nodes.isEmpty, "\(layout)")
+            #expect(controller.pick(at: .zero, slack: 5) == nil)
+        }
+    }
+}

@@ -76,7 +76,8 @@ struct ContentView: View {
         if let window = NSApplication.shared.windows.first(where: { $0.title == "Switchboard" }) {
             try? "\(window.windowNumber)".write(toFile: path + ".window", atomically: true, encoding: .utf8)
         }
-        try? await Task.sleep(for: .seconds(2))
+        // A heavy simulation takes a while to reach full size; --settle gives it longer.
+        try? await Task.sleep(for: .seconds(2 + model.measureSettle))
         model.session.stats.reset()
         try? await Task.sleep(for: .seconds(5))
         let measured = model.session.stats.summary()

@@ -990,31 +990,50 @@ public final class GraphController: @unchecked Sendable {
         var moved: Float = 0
         var push = [SIMD2<Float>](repeating: .zero, count: nodes.count)
 
-        // Bucket nodes on a grid so only near neighbours are compared.
+        // Bucket nodes on a grid so only near neighbours are compared. The grid is a flat
+        // hash table with chained entries: at thousands of nodes a dictionary of arrays,
+        // rebuilt every frame, was most of the frame's time.
         let cell: Float = 30
-        var buckets: [SIMD2<Int32>: [Int]] = [:]
-        buckets.reserveCapacity(nodes.count)
-        for offset in nodes.indices.dropFirst() {
-            let position = nodes[offset].position
-            buckets[SIMD2(Int32((position.x / cell).rounded(.down)), Int32((position.y / cell).rounded(.down))), default: []]
-                .append(offset)
+        var tableSize = 64
+        while tableSize < nodes.count * 2 { tableSize <<= 1 }
+        let mask = tableSize - 1
+        var head = [Int32](repeating: -1, count: tableSize)
+        var chain = [Int32](repeating: -1, count: nodes.count)
+        var cells = [SIMD2<Int32>](repeating: .zero, count: nodes.count)
+        @inline(__always) func slot(_ c: SIMD2<Int32>) -> Int {
+            Int((UInt32(bitPattern: c.x) &* 73_856_093) ^ (UInt32(bitPattern: c.y) &* 19_349_663)) & mask
         }
-        for (key, members) in buckets where nodesCollide {
-            for dx in Int32(0)...1 {
-                for dy in Int32(-1)...1 where dx == 1 || dy >= 0 {
-                    let same = dx == 0 && dy == 0
-                    guard let others = same ? members : buckets[SIMD2(key.x + dx, key.y + dy)] else { continue }
-                    for (i, a) in members.enumerated() {
-                        for b in same ? Array(members[(i + 1)...]) : others {
-                            let delta = nodes[a].position - nodes[b].position
-                            let distance = max(simd_length(delta), 0.01)
-                            let wanted = nodes[a].radius + nodes[b].radius + 5
-                            guard distance < wanted else { continue }
-                            // Coincident nodes separate along a direction fixed by their order.
-                            let direction = distance > 0.02 ? delta / distance : SIMD2(cos(Float(a)), sin(Float(a)))
-                            let shove = direction * (wanted - distance) * 0.5
-                            push[a] += shove
-                            push[b] -= shove
+        if nodesCollide {
+            for offset in nodes.indices.dropFirst() {
+                let position = nodes[offset].position
+                let c = SIMD2(Int32((position.x / cell).rounded(.down)), Int32((position.y / cell).rounded(.down)))
+                cells[offset] = c
+                let h = slot(c)
+                chain[offset] = head[h]
+                head[h] = Int32(offset)
+            }
+            for a in nodes.indices.dropFirst() {
+                let ca = cells[a]
+                for dx in Int32(-1)...1 {
+                    for dy in Int32(-1)...1 {
+                        let neighbour = SIMD2(ca.x + dx, ca.y + dy)
+                        var b = Int(head[slot(neighbour)])
+                        while b >= 0 {
+                            // Each pair once, and only nodes really in that cell: other cells
+                            // can share a slot.
+                            if b > a, cells[b] == neighbour {
+                                let delta = nodes[a].position - nodes[b].position
+                                let distance = max(simd_length(delta), 0.01)
+                                let wanted = nodes[a].radius + nodes[b].radius + 5
+                                if distance < wanted {
+                                    // Coincident nodes separate along a direction fixed by their order.
+                                    let direction = distance > 0.02 ? delta / distance : SIMD2(cos(Float(a)), sin(Float(a)))
+                                    let shove = direction * (wanted - distance) * 0.5
+                                    push[a] += shove
+                                    push[b] -= shove
+                                }
+                            }
+                            b = Int(chain[b])
                         }
                     }
                 }
@@ -1124,7 +1143,8 @@ public final class GraphController: @unchecked Sendable {
 
         // The host and every process are named; destinations compete for the remaining labels.
         if !nodes.isEmpty { frame.labels.append(LabelRequest(text: nodes[0].label, node: 0, kind: 0, side: nodes[0].labelSide)) }
-        let named = (1..<min(processCount + 1, nodes.count)).sorted { nodes[$0].priority > nodes[$1].priority }
+        // Before the first scene is built there are no nodes at all; the render thread may ask by then.
+        let named = (1..<max(1, min(processCount + 1, nodes.count))).sorted { nodes[$0].priority > nodes[$1].priority }
         for offset in named.prefix(160) where (inFocus?.contains(offset) ?? true) && nodes[offset].visibility > 0.5 {
             frame.labels.append(LabelRequest(text: nodes[offset].label, node: offset, kind: 1, side: nodes[offset].labelSide))
         }
