@@ -117,6 +117,8 @@ public struct RenderFrame: Sendable {
     public var extent: Float = 600
     /// Half the width and height the layout needs, in world units.
     public var halfSize = SIMD2<Float>(600, 600)
+    /// The colour theme, for what the renderer colours itself: labels, background, grid.
+    public var palette = PaletteScheme.standard
 }
 
 /// Holds the graph: turns engine snapshots into nodes and edges, lays them out, and
@@ -742,7 +744,7 @@ public final class GraphController: @unchecked Sendable {
                 id: id, position: previous[id]?.position ?? anchor * 0.15, anchor: anchor,
                 radius: 10 + 4 * Self.level(Double(aggregate.bytes), scale: 9),
                 // A process whose connections have all ended is dimmer than one that is merely quiet.
-                color: Palette.process,
+                color: scheme.process,
                 intensity: (0.34 + 0.5 * Self.level(aggregate.rate, scale: 6.5) * Float(aggregate.life)) * Float(0.45 + 0.55 * aggregate.life),
                 bornAt: born(id), label: Self.clip(record?.name ?? "pid \(pid)", to: 22),
                 priority: 1e15 + aggregate.rate, iconPath: record?.path)
@@ -750,7 +752,7 @@ public final class GraphController: @unchecked Sendable {
             // unsigned or whose signature does not verify, amber for one signed by nobody
             // in particular or listening where other machines can reach it.
             switch record?.signing {
-            case .unsigned, .invalid: node.ring = SIMD4(Palette.attention, 1)
+            case .unsigned, .invalid: node.ring = SIMD4(scheme.attention, 1)
             case .adHoc: node.ring = SIMD4(scheme.remoteAccess, 0.85)
             default: if exposed { node.ring = SIMD4(scheme.remoteAccess, 0.85) }
             }
@@ -1053,7 +1055,7 @@ public final class GraphController: @unchecked Sendable {
             edges[offset].fixedControl = pm * 2 - (pa + pb) * 0.5
             edges[offset].visibility = Self.smoothstep(-0.02, 0.18, min(fa, fb))
         }
-        bars = globeView.lines(globeLines)
+        bars = globeView.lines(globeLines, rim: scheme.host)
         settled = false
     }
 
@@ -1147,6 +1149,7 @@ public final class GraphController: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         var frame = RenderFrame()
+        frame.palette = scheme
         frame.extent = extent
         frame.halfSize = halfSize ?? SIMD2(extent, extent)
         frame.nodes.reserveCapacity(nodes.count)

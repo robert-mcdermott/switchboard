@@ -48,7 +48,7 @@ struct GlobeView {
     }
 
     /// The front of every line, ready to draw, with the rim of the disc around them.
-    func lines(_ lines: [GlobeLine]) -> [GraphController.Bar] {
+    func lines(_ lines: [GlobeLine], rim: SIMD3<Float> = Palette.host) -> [GraphController.Bar] {
         var bars: [GraphController.Bar] = []
         bars.reserveCapacity(lines.count / 2 + 200)
         for line in lines {
@@ -65,9 +65,9 @@ struct GlobeView {
         for step in 0..<steps {
             let a = Float(step) / Float(steps) * 2 * .pi, b = Float(step + 1) / Float(steps) * 2 * .pi
             let pa = center + SIMD2(cos(a), sin(a)) * radius, pb = center + SIMD2(cos(b), sin(b)) * radius
-            bars.append(GraphController.Bar(from: pa, to: pb, target: nil, halfWidth: 0.9, glow: 0.13, color: Palette.host * 0.8))
+            bars.append(GraphController.Bar(from: pa, to: pb, target: nil, halfWidth: 0.9, glow: 0.13, color: rim * 0.8))
             let wa = center + SIMD2(cos(a), sin(a)) * (radius + 7), wb = center + SIMD2(cos(b), sin(b)) * (radius + 7)
-            bars.append(GraphController.Bar(from: wa, to: wb, target: nil, halfWidth: 6, glow: 0.035, color: Palette.host))
+            bars.append(GraphController.Bar(from: wa, to: wb, target: nil, halfWidth: 6, glow: 0.035, color: rim))
         }
         return bars
     }
@@ -90,14 +90,14 @@ struct GlobeView {
                 }
             }
         }
-        let grid = Palette.trunk
+        let grid = scheme.trunk
         for latitude in stride(from: -60.0, through: 60.0, by: 30) {
             add(stride(from: -180.0, through: 180.0, by: 6).map { (latitude, $0) }, halfWidth: 0.4, glow: latitude == 0 ? 0.05 : 0.03, color: grid)
         }
         for longitude in stride(from: -180.0, to: 180.0, by: 30) {
             add(stride(from: -84.0, through: 84.0, by: 6).map { ($0, longitude) }, halfWidth: 0.4, glow: 0.03, color: grid)
         }
-        let land = scheme.host * 0.55 + Palette.secondaryText * 0.45
+        let land = scheme.host * 0.55 + scheme.secondaryText * 0.45
         for ring in WorldOutline.rings {
             add(ring.map { (Double($0.0), Double($0.1)) }, halfWidth: 0.8, glow: 0.16, color: land)
         }
@@ -198,7 +198,7 @@ extension GraphController {
             let anchor = view.center + SIMD2(0, -view.radius - 46)
             scene.nodes.append(Node(
                 id: unplaced, position: input.previous[unplaced]?.position ?? anchor, anchor: anchor,
-                radius: 3 + 4 * level(Double(unplacedAggregate.bytes), scale: 9), color: Palette.secondaryText,
+                radius: 3 + 4 * level(Double(unplacedAggregate.bytes), scale: 9), color: input.scheme.secondaryText,
                 intensity: 0.5, bornAt: born(unplaced), label: "no location ×\(Set(unplacedMembers).count)", priority: 1e10,
                 labelSide: 1))
             scene.nodeAggregates[unplaced] = unplacedAggregate

@@ -41,6 +41,10 @@ The same things are selectable in each, and a selection carries across when you 
 
 ![The hierarchy](docs/spikes/m7-hierarchy.jpg)
 
+Six colour themes, cycled with **T**: Standard, the four below (Neon, Phosphor, Amber, Ice), and Colour-safe, whose hues stay distinct with the common colour-vision deficiencies.
+
+![Neon, Phosphor, Amber, and Ice](docs/themes.jpg)
+
 ## What it does not do
 
 It watches; it never blocks, changes, or injects anything. It sends nothing anywhere: no telemetry, no update check, no crash reports. It keeps no packet contents. The one exception to "sends nothing" is optional reverse DNS lookups, which are off unless you choose them.
@@ -94,7 +98,7 @@ The **Workspace** menu holds named arrangements of layout, filter, and panels. T
 build/Switchboard.app/Contents/MacOS/Switchboard --workspace "NOC Wall" --display 2
 ```
 
-Other keys: **Space** pauses, **/** jumps to the filter, **P** changes how lively the picture is, **E** keeps ended connections on screen, **L** shows or hides traffic that never leaves this Mac, **B** and **I** show and hide the panels and the inspector, **0** resets the view.
+Other keys: **Space** pauses, **/** jumps to the filter, **P** changes how lively the picture is, **E** keeps ended connections on screen, **L** shows or hides traffic that never leaves this Mac, **T** changes the colour theme, **B** and **I** show and hide the panels and the inspector, **0** resets the view.
 
 ## Location data
 

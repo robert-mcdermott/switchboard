@@ -76,6 +76,35 @@ import simd
         }
     }
 
+    @Test func everyThemeKeepsItsColoursApartAndReadable() {
+        for theme in PaletteScheme.allCases {
+            // The six services, told apart with normal vision.
+            #expect(Self.closestPair(theme, .normal) >= 20, "\(theme) services")
+            // Labels and nodes stand well clear of the background in lightness.
+            let field = Self.lab(theme.field, seenWith: .normal).x
+            for (name, colour) in [("text", theme.text), ("process", theme.process), ("host", theme.host)] {
+                #expect(Self.lab(colour, seenWith: .normal).x - field > 55, "\(theme) \(name)")
+            }
+            #expect(Self.lab(theme.secondaryText, seenWith: .normal).x - field > 25, "\(theme) secondary text")
+            // The red warning ring is not mistaken for a service colour.
+            let attention = Self.lab(theme.attention, seenWith: .normal)
+            let nearest = theme.categories.map { simd_distance(Self.lab($0, seenWith: .normal), attention) }.min()!
+            #expect(nearest >= 15, "\(theme) attention")
+            // The background is dark: the graph adds light to it.
+            #expect(field < 8, "\(theme) field")
+        }
+    }
+
+    @Test func cyclingVisitsEveryThemeAndComesBack() {
+        var seen: [PaletteScheme] = []
+        var theme = PaletteScheme.standard
+        repeat {
+            seen.append(theme)
+            theme = theme.next
+        } while theme != .standard
+        #expect(seen == PaletteScheme.allCases)
+    }
+
     @Test func everyServiceHasAColourInBothPalettes() {
         for scheme in PaletteScheme.allCases {
             #expect(scheme.categories.count == 6)

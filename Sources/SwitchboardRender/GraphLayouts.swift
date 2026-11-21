@@ -67,13 +67,13 @@ extension GraphController {
         let record = input.processes[pid]
         let id = NodeID.process(pid)
         var node = Node(
-            id: id, position: input.previous[id]?.position ?? anchor, anchor: anchor, radius: radius, color: Palette.process,
+            id: id, position: input.previous[id]?.position ?? anchor, anchor: anchor, radius: radius, color: input.scheme.process,
             intensity: (0.42 + 0.45 * level(aggregate.rate, scale: 6.5) * Float(aggregate.life)) * Float(0.5 + 0.5 * aggregate.life),
             bornAt: bornAt, label: clip(record?.name ?? "pid \(pid)", to: 26), priority: 1e15 + aggregate.rate,
             iconPath: record?.path, labelSide: -1)
         let exposed = input.listeners[pid]?.contains { $0.exposed } ?? false
         switch record?.signing {
-        case .unsigned, .invalid: node.ring = SIMD4(Palette.attention, 1)
+        case .unsigned, .invalid: node.ring = SIMD4(input.scheme.attention, 1)
         case .adHoc: node.ring = SIMD4(input.scheme.remoteAccess, 0.85)
         default: if exposed { node.ring = SIMD4(input.scheme.remoteAccess, 0.85) }
         }
@@ -208,7 +208,7 @@ extension GraphController {
             } else {
                 scene.nodes.append(Node(
                     id: entry.key, position: input.previous[entry.key]?.position ?? anchor, anchor: anchor,
-                    radius: radius(entry.value), color: Palette.process, intensity: 0.4, bornAt: born(entry.key),
+                    radius: radius(entry.value), color: input.scheme.process, intensity: 0.4, bornAt: born(entry.key),
                     label: "\(perProcess.count - keptSet.count) other processes", priority: 1e14, labelSide: -1))
             }
         }
@@ -313,7 +313,7 @@ extension GraphController {
             scene.nodes.append(processNode(
                 input, pid: pid, aggregate: aggregate, anchor: SIMD2(leftEdge - 26, y), radius: 7, bornAt: born(.process(pid))))
             // A faint rule along the lane.
-            scene.bars.append(Bar(from: SIMD2(leftEdge, y), to: SIMD2(rightEdge, y), target: nil, halfWidth: 0.35, glow: 0.012, color: Palette.trunk))
+            scene.bars.append(Bar(from: SIMD2(leftEdge, y), to: SIMD2(rightEdge, y), target: nil, halfWidth: 0.35, glow: 0.012, color: input.scheme.trunk))
 
             // A lane with hundreds of bars gets dimmer ones, so it reads as texture, not as a white block.
             let crowd = Float(aggregate.flows.count { ($0.closedAt ?? input.now) >= start })
@@ -364,11 +364,11 @@ extension GraphController {
             let id = NodeID.marker(mark)
             let anchor = SIMD2(position, bottom - 30)
             scene.nodes.append(Node(
-                id: id, position: anchor, anchor: anchor, radius: 0.6, color: Palette.secondaryText, intensity: 0.3, bornAt: -100,
+                id: id, position: anchor, anchor: anchor, radius: 0.6, color: input.scheme.secondaryText, intensity: 0.3, bornAt: -100,
                 label: text, priority: 1e11 - Double(mark), labelSide: 0))
             scene.bars.append(Bar(
                 from: SIMD2(position, top + 16), to: SIMD2(position, bottom - 22), target: nil, halfWidth: 0.4,
-                glow: mark == 0 ? 0.07 : 0.022, color: mark == 0 ? input.scheme.host : Palette.trunk))
+                glow: mark == 0 ? 0.07 : 0.022, color: mark == 0 ? input.scheme.host : input.scheme.trunk))
             mark += 1
         }
 

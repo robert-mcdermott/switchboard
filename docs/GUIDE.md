@@ -108,6 +108,21 @@ Hover for details, click to pin them in the inspector, ⌘-click to add to the s
 
 **Cinema** draws at up to 120 frames a second with full glow; for walls and demonstrations. **Operator** draws at 60 with less glow and more labels, at about half the CPU; for leaving open all day. **Still** has no motion at all. **P** cycles between them.
 
+### Themes
+
+**T** cycles through six colour themes, and Settings ▸ Display ▸ Theme picks one. The choice is kept, and travels with exported settings.
+
+| Theme | Looks like |
+|---|---|
+| Standard | Cyan, violet, and green on deep navy |
+| Neon | Magenta and cyan on deep violet |
+| Phosphor | A green phosphor terminal |
+| Amber | An amber terminal |
+| Ice | Pale blues and whites on blue-black; the quietest |
+| Colour-safe | Hues that stay distinct with the common colour-vision deficiencies |
+
+Every theme keeps a colour of its own for each kind of traffic, a red ring for a program whose signature fails, and warm colours for remote access and cleartext. All are dark: the graph adds light to its background, as a radar screen does. The panels and controls stay as they are.
+
 ## Filtering
 
 The filter field narrows the graph, the tables, and the log search at once.
@@ -170,6 +185,7 @@ Choose *Save Current as Workspace…* to add your own. *Export Settings…* and 
 | B, I | Show or hide the panels, the inspector |
 | K | Kiosk mode |
 | L | Show or hide traffic within this Mac |
+| T | Next colour theme |
 | 0 | Reset zoom and pan, and turn the globe back home |
 | Esc | Leave focus or kiosk mode |
 

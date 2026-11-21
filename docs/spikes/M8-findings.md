@@ -50,6 +50,7 @@ The step that pushes overlapping nodes apart bucketed them into a dictionary of 
 ## Faults found
 
 - **A crash before the first scene.** The render thread can ask for a frame before any scene exists, which happens when the first snapshot is slow, as with 5,000 simulated connections. Building the label list then formed an invalid range. A test now draws every layout before any scene.
+- **A flag with no value could stop the window opening.** AppKit reads the command line as `-key value` pairs and takes anything left over as a document to open, and an app launched to open a document opens no window of its own. `--kiosk`, `--keep-ended`, or `--hide-this-mac` before another option shifted the pairs and left a value over, so the app ran with no window. Found when a measurement with `--hide-this-mac` never finished. The app now registers `NSTreatUnknownArgumentsAsOpen = NO`; it opens no documents.
 - **macOS's "reopen windows?" alert blocks a launch** after the app was stopped while starting. Measurement runs now pass `-ApplePersistenceIgnoreState YES`. A person sees the alert once and can dismiss it; the guide says so.
 
 ## The soak

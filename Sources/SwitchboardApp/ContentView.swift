@@ -132,6 +132,10 @@ private struct GraphStatus: View {
                 Text("KEEPING ENDED CONNECTIONS — \(model.endedCount) shown dimmed · press E to turn off")
                     .foregroundStyle(Color.dim)
             }
+            if let theme = model.themeCaption {
+                Text("THEME — \(theme.uppercased()) · press T for the next")
+                    .foregroundStyle(Color.dim)
+            }
             if !model.showThisMac {
                 Text("ONLY TRAFFIC LEAVING THIS MAC — press L to show everything")
                     .foregroundStyle(Color.dim)

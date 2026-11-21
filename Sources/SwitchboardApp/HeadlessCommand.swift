@@ -67,6 +67,13 @@ enum HeadlessCommand {
                 controller.layout = chosen
                 controller.lanesWindow = value("--lanes-window").flatMap(Double.init) ?? 60
             }
+            if let name = value("--palette") {
+                guard let theme = PaletteScheme(rawValue: name) else {
+                    print("--palette must be one of: \(PaletteScheme.allCases.map(\.rawValue).joined(separator: ", "))")
+                    return 2
+                }
+                controller.palette = theme
+            }
             // Same ticks, same times, same picture, every run.
             SteppedRun.run(sources: resolved.sources, engine: engine, until: at) { time in
                 controller.update(engine.snapshot(), time: Float(time))

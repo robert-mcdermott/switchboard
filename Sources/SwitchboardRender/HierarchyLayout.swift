@@ -239,7 +239,7 @@ extension GraphController {
                     scene.nodes.append(Node(
                         id: entry.id, position: start, anchor: anchor,
                         radius: column == 0 ? 7 : 2.5 + 4 * level(Double(entry.aggregate.bytes), scale: 9),
-                        color: column == 0 ? Palette.process : input.scheme.color(forService: entry.aggregate.service),
+                        color: column == 0 ? input.scheme.process : input.scheme.color(forService: entry.aggregate.service),
                         intensity: (0.35 + 0.6 * level(entry.aggregate.rate, scale: 6.5)) * Float(max(entry.aggregate.life, 0.2)),
                         bornAt: born(entry.id), label: clip(entry.label, to: 34),
                         priority: column == 0 ? 1e13 : 2 + Double(entry.aggregate.bytes), labelSide: leftLabel ? -1 : 1))

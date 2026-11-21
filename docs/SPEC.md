@@ -337,6 +337,8 @@ The reference is the control-room display from a film: a dark field, luminous li
 
 Data is set in SF Mono, chrome in SF Pro. Panels are flat with hairline borders and no drop shadows. Protocol hues are a starting point: the final set is validated for the three common colour-vision deficiencies before M3 closes, and an alternate palette ships alongside it.
 
+**Themes** (after M8). The table above is the Standard theme. A theme (`PaletteScheme`) sets every colour the graph uses: the six service hues, this Mac, process nodes, label text, trunk lines, the attention ring, and the field and grid, which reach the shader as uniforms. Six ship: Standard, Neon, Phosphor, Amber, Ice, and Colour-safe; **T** cycles them and Settings picks one. Tests hold each to the same rules: the service hues at least 20 apart in CIELAB, text and nodes at least 55 lighter than the field, the attention colour at least 15 from every service hue, and a dark field. All are dark, because the graph is additive light. The SwiftUI chrome does not change with the theme.
+
 ### 9.3 Presentation profiles
 
 | Profile | For | Rendering |

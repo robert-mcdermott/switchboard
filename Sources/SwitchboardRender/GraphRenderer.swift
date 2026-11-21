@@ -114,7 +114,8 @@ public final class GraphRenderer: @unchecked Sendable {
         precondition(MemoryLayout<EdgeInstance>.stride == 64, "EdgeInstance must match the shader")
         precondition(MemoryLayout<NodeInstance>.stride == 64, "NodeInstance must match the shader")
         precondition(MemoryLayout<LabelInstance>.stride == 64, "LabelInstance must match the shader")
-        precondition(MemoryLayout<Uniforms>.stride == 48, "Uniforms must match the shader")
+        precondition(MemoryLayout<Uniforms>.stride == 80, "Uniforms must match the shader")
+        precondition(MemoryLayout<Uniforms>.offset(of: \Uniforms.field) == 48, "Uniforms must match the shader")
 
         guard let labels = LabelAtlas(device: device), let icons = IconAtlas(device: device) else {
             throw RendererError.unavailable("could not create texture atlases")
@@ -187,7 +188,7 @@ public final class GraphRenderer: @unchecked Sendable {
         var uniforms = Uniforms(
             viewport: SIMD2(Float(width), Float(height)), center: camera.center, scale: camera.scale, time: time,
             pulseGain: profile.pulseGain, bloom: profile.bloom, grain: profile.grain, gridAlpha: profile.gridAlpha,
-            backing: backing)
+            backing: backing, field: SIMD4(frame.palette.field, 1), grid: SIMD4(frame.palette.grid, 1))
         let uniformLength = MemoryLayout<Uniforms>.stride
 
         // Icons and label textures are filled in on the way through.
@@ -280,8 +281,11 @@ public final class GraphRenderer: @unchecked Sendable {
         instances.reserveCapacity(frame.labels.count)
         // Glyphs were rasterised at two pixels per point; scale to this display.
         let glyphScale = backing / Float(LabelAtlas.rasterScale)
+        // This Mac's label keeps the standard theme's cyan in the colour-safe theme, as it always has.
+        let theme = frame.palette
+        let hostLabel = theme == .colorSafe ? Palette.host : theme.host
         let colors: [SIMD4<Float>] = [
-            SIMD4(Palette.host, 1), SIMD4(Palette.text, 0.95), SIMD4(Palette.secondaryText * 1.25, 0.95),
+            SIMD4(hostLabel, 1), SIMD4(theme.text, 0.95), SIMD4(theme.secondaryText * 1.25, 0.95),
         ]
         // Labels arrive most important first; a label that would cover an earlier one is dropped.
         var placed: [SIMD4<Float>] = []

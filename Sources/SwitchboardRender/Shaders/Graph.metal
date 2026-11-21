@@ -17,6 +17,8 @@ struct Uniforms {
     float  gridAlpha;
     float  backing;    // pixels per point
     float  padding;
+    float4 field;      // the theme's background
+    float4 grid;       // the theme's graph paper
 };
 
 struct EdgeInstance {
@@ -78,7 +80,7 @@ fragment float4 field_fragment(Fullscreen in [[stage_in]], constant Uniforms &u 
     float2 toLine = abs(fract(world / spacing - 0.5) - 0.5) * spacing * u.scale;
     float line = 1.0 - smoothstep(0.0, 1.3 * u.backing, min(toLine.x, toLine.y));
     float falloff = exp(-length(world) / 900.0);
-    float3 grid = float3(0.055, 0.102, 0.169) * line * u.gridAlpha * (0.3 + 0.7 * falloff);
+    float3 grid = u.grid.rgb * line * u.gridAlpha * (0.3 + 0.7 * falloff);
     return float4(grid, 1.0);
 }
 
@@ -308,7 +310,7 @@ fragment float4 composite_fragment(Fullscreen in [[stage_in]],
 
     float2 fromCentre = (in.uv - 0.5) * float2(u.viewport.x / u.viewport.y, 1.0);
     float vignette = smoothstep(1.05, 0.25, length(fromCentre));
-    float3 field = float3(5.0, 8.0, 15.0) / 255.0 * mix(0.55, 1.25, vignette);
+    float3 field = u.field.rgb * mix(0.55, 1.25, vignette);
 
     float3 colour = field + light;
     colour += (hash21(in.position.xy + fract(u.time) * 61.0) - 0.5) * u.grain;

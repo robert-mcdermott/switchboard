@@ -21,12 +21,14 @@ GOLDEN="$ROOT/Tests/Goldens"
 mkdir -p "$OUT" "$GOLDEN"
 
 status=0
-# name, scenario, and layout of each reference picture.
-for entry in "quiet quiet constellation" "developer developer constellation" "stress stress constellation" \
-             "flow developer flow" "lanes developer lanes" "globe developer globe" "hierarchy developer hierarchy"; do
+# name, scenario, layout, and colour theme of each reference picture.
+for entry in "quiet quiet constellation standard" "developer developer constellation standard" \
+             "stress stress constellation standard" "flow developer flow standard" "lanes developer lanes standard" \
+             "globe developer globe standard" "hierarchy developer hierarchy standard" \
+             "neon-globe developer globe neon"; do
   set -- $entry
-  name="$1"; scenario="$2"; layout="$3"
-  "$APP" --snapshot "$OUT/$name.png" --source "sim:$scenario" --layout "$layout" --at 20 --size 1200x750 >/dev/null
+  name="$1"; scenario="$2"; layout="$3"; palette="$4"
+  "$APP" --snapshot "$OUT/$name.png" --source "sim:$scenario" --layout "$layout" --palette "$palette" --at 20 --size 1200x750 >/dev/null
   if [ "$MODE" = "--update" ]; then
     cp "$OUT/$name.png" "$GOLDEN/$name.png"
     echo "UPDATED $name"

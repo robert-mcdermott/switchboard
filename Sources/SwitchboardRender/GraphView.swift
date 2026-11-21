@@ -160,6 +160,8 @@ public final class GraphSession: NSObject {
         case toggleKiosk
         /// Show or hide connections that never leave this Mac.
         case toggleThisMac
+        /// The next colour theme.
+        case cycleTheme
     }
 
     public enum ContextAction: Sendable {
@@ -574,6 +576,7 @@ final class GraphLayerView: NSView {
         case "5": session?.key(.layout(5))
         case "k", "K": session?.key(.toggleKiosk)
         case "l", "L": session?.key(.toggleThisMac)
+        case "t", "T": session?.key(.cycleTheme)
         case "\u{1B}": session?.key(.escape)
         default: super.keyDown(with: event)
         }

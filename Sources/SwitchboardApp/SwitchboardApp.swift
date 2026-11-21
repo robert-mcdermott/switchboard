@@ -113,11 +113,10 @@ struct SettingsView: View {
                     Text("Operator").tag("operator")
                     Text("Still").tag("still")
                 }
-                Picker("Colours", selection: $palette) {
-                    Text("Standard").tag("standard")
-                    Text("Colour-safe").tag("colorSafe")
+                Picker("Theme", selection: $palette) {
+                    ForEach(PaletteScheme.allCases, id: \.self) { Text($0.displayName).tag($0.rawValue) }
                 }
-                Text("Colour-safe uses hues that stay distinct with the common colour-vision deficiencies.")
+                Text("T in the main window cycles through them. Colour-safe uses hues that stay distinct with the common colour-vision deficiencies; the others are for looks, and keep warm colours for remote access and cleartext.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

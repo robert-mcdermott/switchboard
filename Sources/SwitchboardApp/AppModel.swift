@@ -223,6 +223,9 @@ final class AppModel {
     var focused = false
     /// Ended connections stay on the graph, subdued, instead of fading away.
     private(set) var keepEnded = UserDefaults.standard.bool(forKey: "keepEnded")
+    /// The theme's name, shown for a moment after T changes it.
+    private(set) var themeCaption: String?
+    private var captionGeneration = 0
     /// Connections that never leave this Mac are shown unless this is turned off.
     private(set) var showThisMac = UserDefaults.standard.object(forKey: "showThisMac") as? Bool ?? true
     private(set) var endedCount = 0
@@ -361,6 +364,7 @@ final class AppModel {
                 if kiosk { setKiosk(false) } else { focused = false }
             case .toggleKeepEnded: setKeepEnded(!keepEnded)
             case .toggleThisMac: setShowThisMac(!showThisMac)
+            case .cycleTheme: setTheme(session.controller.palette.next)
             case .layout(let number):
                 if GraphLayout.allCases.indices.contains(number - 1) { setLayout(GraphLayout.allCases[number - 1]) }
             case .toggleKiosk: setKiosk(!kiosk)
@@ -439,6 +443,19 @@ final class AppModel {
     }
 
     // MARK: - Actions
+
+    /// Switches colour theme, saves it as the setting, and names it on screen for a moment.
+    func setTheme(_ theme: PaletteScheme) {
+        session.controller.palette = theme
+        UserDefaults.standard.set(theme.rawValue, forKey: "palette")
+        themeCaption = theme.displayName
+        captionGeneration += 1
+        let generation = captionGeneration
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            if self?.captionGeneration == generation { self?.themeCaption = nil }
+        }
+    }
 
     /// Shows or hides connections that never leave this Mac, in the graph, the tables, and the log search.
     func setShowThisMac(_ on: Bool) {

@@ -61,6 +61,9 @@ struct Uniforms {
     /// Pixels per point.
     var backing: Float
     var padding: Float = 0
+    /// The theme's background and graph-paper colours; the fourth component is unused.
+    var field = SIMD4<Float>(5.0 / 255, 8.0 / 255, 15.0 / 255, 1)
+    var grid = SIMD4<Float>(0.055, 0.102, 0.169, 1)
 }
 
 /// The visual language from docs/SPEC.md §9.2.
@@ -96,10 +99,23 @@ public enum Palette {
     }
 }
 
-/// Which set of service colours to use.
+/// A colour theme: every colour the graph is drawn in, from the service hues to the
+/// background. Stored under the "palette" setting; the raw values are what it saves.
+///
+/// All of them are dark. The graph adds light to a dark field, as a radar screen does,
+/// and a pale background would wash the glow out.
 public enum PaletteScheme: String, Sendable, CaseIterable {
-    /// The colours in docs/SPEC.md §9.2.
+    /// The colours in docs/SPEC.md §9.2: cyan, violet, and green on deep navy.
     case standard
+    /// Magenta and cyan on deep violet, after the neon of film cyberspace.
+    case neon
+    /// Green on black, like a phosphor terminal; warm colours are kept for remote access
+    /// and cleartext so they still stand out.
+    case phosphor
+    /// Amber on brown-black, like an amber terminal.
+    case amber
+    /// Pale blues and whites on blue-black: quiet, for a room that is not dark.
+    case ice
     /// Colours chosen to stay distinguishable with the common colour-vision deficiencies.
     case colorSafe
 
@@ -107,11 +123,37 @@ public enum PaletteScheme: String, Sendable, CaseIterable {
         SIMD3(Float((hex >> 16) & 0xff), Float((hex >> 8) & 0xff), Float(hex & 0xff)) / 255
     }
 
+    /// The name shown in Settings.
+    public var displayName: String {
+        switch self {
+        case .standard: "Standard"
+        case .neon: "Neon"
+        case .phosphor: "Phosphor"
+        case .amber: "Amber"
+        case .ice: "Ice"
+        case .colorSafe: "Colour-safe"
+        }
+    }
+
+    /// The next theme, for cycling through them with a key.
+    public var next: PaletteScheme {
+        let all = Self.allCases
+        return all[(all.firstIndex(of: self)! + 1) % all.count]
+    }
+
     /// The service categories, in a fixed order: TLS, QUIC, DNS, remote access, cleartext, other.
     public var categories: [SIMD3<Float>] {
         switch self {
         case .standard:
             [Palette.tls, Palette.quic, Palette.dns, Palette.remoteAccess, Palette.cleartext, Palette.other]
+        case .neon:
+            [Self.rgb(0x00F0FF), Self.rgb(0xFF2BD6), Self.rgb(0x7CFF6B), Self.rgb(0xFFE347), Self.rgb(0xFF6B35), Self.rgb(0x8C7AB8)]
+        case .phosphor:
+            [Self.rgb(0x33FF88), Self.rgb(0xC6FF3B), Self.rgb(0x3BE8D0), Self.rgb(0xFFD23F), Self.rgb(0xFF8F3B), Self.rgb(0x4E7D62)]
+        case .amber:
+            [Self.rgb(0xFFB000), Self.rgb(0xFFE6B0), Self.rgb(0xC8D86A), Self.rgb(0xFF7A45), Self.rgb(0xFF4D6D), Self.rgb(0x8A6F4E)]
+        case .ice:
+            [Self.rgb(0x9EE7FF), Self.rgb(0xC3B6FF), Self.rgb(0xA6FFE0), Self.rgb(0xFFE3A3), Self.rgb(0xFFB08A), Self.rgb(0x7D93AD)]
         case .colorSafe:
             // After Okabe and Ito: sky blue, reddish purple, bluish green, yellow, vermillion,
             // and a grey dark enough to differ from the purple by lightness alone. Checked
@@ -120,11 +162,100 @@ public enum PaletteScheme: String, Sendable, CaseIterable {
         }
     }
 
-    public var host: SIMD3<Float> { categories[0] }
+    /// This Mac.
+    public var host: SIMD3<Float> {
+        switch self {
+        case .ice: Self.rgb(0xEAF8FF)
+        default: categories[0]
+        }
+    }
+
     public var remoteAccess: SIMD3<Float> { categories[3] }
-    public var trunk: SIMD3<Float> { Palette.trunk }
+
+    /// The lines from this Mac to its processes, and the grid lines a layout draws.
+    public var trunk: SIMD3<Float> {
+        switch self {
+        case .standard, .colorSafe: Palette.trunk
+        case .neon: Self.rgb(0x7A3FD0)
+        case .phosphor: Self.rgb(0x2E8F55)
+        case .amber: Self.rgb(0xA8621E)
+        case .ice: Self.rgb(0x6F93BF)
+        }
+    }
+
     /// Connections between two processes on this Mac.
-    public var local: SIMD3<Float> { Palette.other * 1.15 }
+    public var local: SIMD3<Float> {
+        switch self {
+        case .standard, .colorSafe: Palette.other * 1.15
+        default: categories[5] * 1.15
+        }
+    }
+
+    /// Process nodes.
+    public var process: SIMD3<Float> {
+        switch self {
+        case .standard, .colorSafe: Palette.process
+        case .neon: Self.rgb(0xF2D9FF)
+        case .phosphor: Self.rgb(0xC8FFD9)
+        case .amber: Self.rgb(0xFFE7C2)
+        case .ice: Self.rgb(0xDDE8F5)
+        }
+    }
+
+    /// Labels of processes and destinations.
+    public var text: SIMD3<Float> {
+        switch self {
+        case .standard, .colorSafe: Palette.text
+        case .neon: Self.rgb(0xE8D8FF)
+        case .phosphor: Self.rgb(0xB8F5C8)
+        case .amber: Self.rgb(0xFFD9A0)
+        case .ice: Self.rgb(0xDDE8F5)
+        }
+    }
+
+    /// Quieter labels, places with no location, and the land on the globe.
+    public var secondaryText: SIMD3<Float> {
+        switch self {
+        case .standard, .colorSafe: Palette.secondaryText
+        case .neon: Self.rgb(0x8A6FB0)
+        case .phosphor: Self.rgb(0x4F8F66)
+        case .amber: Self.rgb(0x9C7444)
+        case .ice: Self.rgb(0x7E93AD)
+        }
+    }
+
+    /// The ring on a process whose signature is missing or broken.
+    public var attention: SIMD3<Float> {
+        switch self {
+        case .standard, .colorSafe: Palette.attention
+        case .neon: Self.rgb(0xFF1E56)
+        case .phosphor: Self.rgb(0xFF4545)
+        case .amber: Self.rgb(0xFF2E4D)
+        case .ice: Self.rgb(0xFF5C7A)
+        }
+    }
+
+    /// The background, before the vignette darkens its edges.
+    public var field: SIMD3<Float> {
+        switch self {
+        case .standard, .colorSafe: SIMD3(5, 8, 15) / 255
+        case .neon: SIMD3(11, 4, 24) / 255
+        case .phosphor: SIMD3(2, 10, 5) / 255
+        case .amber: SIMD3(13, 7, 2) / 255
+        case .ice: SIMD3(4, 8, 15) / 255
+        }
+    }
+
+    /// The graph paper behind everything, at full strength.
+    public var grid: SIMD3<Float> {
+        switch self {
+        case .standard, .colorSafe: SIMD3(0.055, 0.102, 0.169)
+        case .neon: SIMD3(0.12, 0.04, 0.17)
+        case .phosphor: SIMD3(0.03, 0.12, 0.06)
+        case .amber: SIMD3(0.13, 0.07, 0.02)
+        case .ice: SIMD3(0.06, 0.11, 0.16)
+        }
+    }
 
     public func color(forService service: String?) -> SIMD3<Float> {
         categories[Palette.category(forService: service)]
