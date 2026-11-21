@@ -113,7 +113,7 @@ What that does not show: eight real hours of the app with a window, the GPU, Swi
 - **Moving to another display** is untested: there was only one.
 - **Export and import of settings** have not been tried by hand. (Tests for them were added in M8.)
 - **Saving, replacing, and deleting a workspace** through the menu have not been tried by hand. Applying a built-in one from the command line has.
-- **The kiosk caption** (the name and totals, top left) did not appear in the one capture taken. It may be hidden behind the menu-bar area in full screen; I have not seen it on screen.
+- **The kiosk caption** (the name and totals, top left) does not appear in captures, and that is the capture's doing: the in-app window capture pastes the graph's own frame over the graph's area, covering any text that floats on it, as it does the tooltip. It has not been seen on screen.
 - **Hiding the pointer and keeping the display awake** in kiosk mode are written and unobserved.
 - **Pointer interaction in the new layouts** (hover, click, right-click on ribbons and bars) is covered by tests of what is under a point, not by hand.
 - In lanes, the lane area does not use the full width of a wide window when there are many lanes: the layout is fitted by its height.
