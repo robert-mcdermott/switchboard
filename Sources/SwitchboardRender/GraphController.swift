@@ -199,6 +199,14 @@ public final class GraphController: @unchecked Sendable {
     private var clusteringMode = Clustering.automatic(threshold: 300)
     private var expanded = Set<NodeID>()
     private var scheme = PaletteScheme.standard
+    private var keepEnded = false
+    /// Connections that have ended, remembered while `keepsEnded` is on.
+    private var ended: [FlowID: (flow: Flow, process: ProcessRecord?)] = [:]
+
+    /// How bright an ended connection stays, as a fraction of a live one.
+    static let endedLife = 0.22
+    /// At most this many ended connections are remembered; the oldest go first.
+    public static let endedLimit = 3000
 
     /// Closed flows linger this long before leaving the graph.
     public static let fadeSeconds = 6.0
@@ -248,6 +256,27 @@ public final class GraphController: @unchecked Sendable {
     public var palette: PaletteScheme {
         get { lock.withLock { scheme } }
         set { change { scheme = newValue } }
+    }
+
+    /// When on, connections that have ended stay on the graph, subdued, instead of
+    /// fading away. Remembering starts when this is turned on and is forgotten when it is
+    /// turned off.
+    public var keepsEnded: Bool {
+        get { lock.withLock { keepEnded } }
+        set {
+            change {
+                keepEnded = newValue
+                if !newValue { ended.removeAll() }
+            }
+        }
+    }
+
+    /// How many ended connections are being kept on screen.
+    public var endedCount: Int { lock.withLock { ended.count } }
+
+    /// Forgets the ended connections without leaving the mode.
+    public func clearEnded() {
+        change { ended.removeAll() }
     }
 
     /// Opens a network node into its individual addresses, or closes it again.
@@ -314,7 +343,7 @@ public final class GraphController: @unchecked Sendable {
     }
 
     private func rebuild(_ snapshot: EngineSnapshot, time: Float) {
-        let processes = Dictionary(uniqueKeysWithValues: snapshot.processes.map { ($0.pid, $0) })
+        var processes = Dictionary(uniqueKeysWithValues: snapshot.processes.map { ($0.pid, $0) })
         let listeners = Dictionary(grouping: snapshot.listeners, by: \.pid)
 
         // Take what is needed from shared state, then let go of the lock for the heavy part.
@@ -324,6 +353,8 @@ public final class GraphController: @unchecked Sendable {
         let expanded = self.expanded
         let scheme = self.scheme
         var arrivals = self.arrivals
+        let keepEnded = self.keepEnded
+        var ended = self.ended
         let previous = Dictionary(uniqueKeysWithValues: nodes.map { ($0.id, $0) })
         lock.unlock()
 
@@ -339,12 +370,39 @@ public final class GraphController: @unchecked Sendable {
         var byAddress: [IPAddress: Aggregate] = [:]
         var byAddressEdge: [AddressEdge: Aggregate] = [:]
         var byPeer: [PeerEdge: Aggregate] = [:]
-        for flow in snapshot.flows {
+        // With "keep ended" on, closed connections are remembered as they go by, and the
+        // ones the engine has since forgotten are drawn from that memory.
+        var shown = snapshot.flows
+        if keepEnded {
+            var present = Set<FlowID>()
+            present.reserveCapacity(snapshot.flows.count)
+            for flow in snapshot.flows {
+                present.insert(flow.id)
+                if flow.state == .closed { ended[flow.id] = (flow, processes[flow.pid]) }
+            }
+            if ended.count > Self.endedLimit {
+                let oldest = ended.values.sorted { ($0.flow.closedAt ?? 0, $0.flow.id) < ($1.flow.closedAt ?? 0, $1.flow.id) }
+                for entry in oldest.prefix(ended.count - Self.endedLimit) { ended[entry.flow.id] = nil }
+            }
+            for entry in ended.values.sorted(by: { $0.flow.id < $1.flow.id }) where !present.contains(entry.flow.id) {
+                // Looking at the past, something that had not ended yet is not shown as ended.
+                guard (entry.flow.closedAt ?? 0) <= snapshot.time else { continue }
+                shown.append(entry.flow)
+                if processes[entry.flow.pid] == nil, let process = entry.process { processes[entry.flow.pid] = process }
+            }
+        }
+
+        for flow in shown {
             if !filter.isEmpty, !filter.matches(flow, process: processes[flow.pid], now: snapshot.time) { continue }
             var life = 1.0
             if flow.state == .closed {
                 life = 1 - (snapshot.time - (flow.closedAt ?? snapshot.time)) / Self.fadeSeconds
-                guard life > 0 else { continue }
+                if keepEnded {
+                    // Subdued, but it stays.
+                    life = max(life, Self.endedLife)
+                } else if life <= 0 {
+                    continue
+                }
             }
             byProcess[flow.pid, default: Aggregate()].add(flow, life: life)
 
@@ -430,7 +488,9 @@ public final class GraphController: @unchecked Sendable {
             var node = Node(
                 id: id, position: previous[id]?.position ?? anchor * 0.15, anchor: anchor,
                 radius: 10 + 4 * Self.level(Double(aggregate.bytes), scale: 9),
-                color: Palette.process, intensity: 0.34 + 0.5 * Self.level(aggregate.rate, scale: 6.5) * Float(aggregate.life),
+                // A process whose connections have all ended is dimmer than one that is merely quiet.
+                color: Palette.process,
+                intensity: (0.34 + 0.5 * Self.level(aggregate.rate, scale: 6.5) * Float(aggregate.life)) * Float(0.45 + 0.55 * aggregate.life),
                 bornAt: born(id), label: Self.clip(record?.name ?? "pid \(pid)", to: 22),
                 priority: 1e15 + aggregate.rate, iconPath: record?.path)
             // A process listening on a non-loopback address is reachable from outside.
@@ -549,6 +609,8 @@ public final class GraphController: @unchecked Sendable {
         nodeForAddress = nodeFor
         processCount = pids.count
         self.arrivals = remembered
+        // Unless the mode was switched off while this was being worked out.
+        if self.keepEnded { self.ended = ended }
         nodes = built
         edges = drawn
         index = lookup
@@ -928,7 +990,7 @@ public final class GraphController: @unchecked Sendable {
 
     private func trafficRows(_ aggregate: Aggregate) -> [HoverInfo.Row] {
         var rows: [HoverInfo.Row] = [
-            .init(label: "Connections", value: aggregate.open == aggregate.total ? "\(aggregate.open)" : "\(aggregate.open) open, \(aggregate.total - aggregate.open) closing"),
+            .init(label: "Connections", value: aggregate.open == aggregate.total ? "\(aggregate.open)" : "\(aggregate.open) open, \(aggregate.total - aggregate.open) ended"),
             .init(label: "Rate", value: "↓ \(ByteFormat.rate(aggregate.rateIn))  ↑ \(ByteFormat.rate(aggregate.rateOut))"),
             .init(label: "Total", value: "↓ \(ByteFormat.bytes(Double(aggregate.bytesIn)))  ↑ \(ByteFormat.bytes(Double(aggregate.bytesOut)))"),
         ]

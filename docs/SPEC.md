@@ -194,6 +194,7 @@ All conform to one `FlowSource` protocol and report a capability set and a healt
 - **Flow key:** `(protocol, local address, local port, remote address, remote port)`. A flow is owned by one PID; sockets shared across `fork` are attributed to the lowest live PID holding the fd, and the others are listed in the inspector.
 - **Attribution priority:** LibProc fd owner → NStat PID → kernel list PID → PKTAP PID. The winning source is recorded on the flow.
 - **Lifecycle:** `new → active → idle → closing → closed`. `idle` after 5 s without bytes. `closed` when the source reports the flow removed or a FIN/RST is observed. Closed flows stay in the model for a fade window (default 30 s), then leave the live view and remain in the log.
+- **Keeping ended flows** is an optional display mode, off by default: closed flows stay on the graph, subdued, instead of fading out, up to 3,000 of them. It changes what is drawn, not what the engine tracks.
 - **Listeners** are tracked separately, never as flows, and marked `exposed` when bound to a non-loopback address.
 - **Unconnected UDP sockets** have no single remote endpoint. They appear as a socket with totals; a per-destination breakdown needs capture, and the UI says so rather than inventing an edge.
 

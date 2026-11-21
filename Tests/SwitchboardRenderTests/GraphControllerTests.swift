@@ -397,3 +397,120 @@ private func flow(pid: Int32, remote: String, port: UInt16 = 443, id: UInt64) ->
         #expect(lit.nodes.filter { $0.ring == SIMD4<Float>(1, 1, 1, 1) }.count == 2)
     }
 }
+
+@Suite struct KeepEndedTests {
+    /// One connection that opens at 0, closes at 1, and is long forgotten by the engine at 100.
+    private func ended(keeping: Bool) -> (GraphController, FlowEngine) {
+        let engine = FlowEngine()
+        let controller = GraphController()
+        controller.keepsEnded = keeping
+        engine.ingest([flow(pid: 1, remote: "1.1.1.1", id: 1), flow(pid: 2, remote: "8.8.8.8", id: 2)], from: "test", at: 0)
+        controller.update(engine.snapshot(), time: 0)
+        engine.ingest([.removed(sourceID: 1)], from: "test", at: 1)
+        controller.update(engine.snapshot(), time: 1)
+        engine.ingest([], from: "test", at: 100)
+        controller.update(engine.snapshot(), time: 100)
+        return (controller, engine)
+    }
+
+    @Test func byDefaultEndedConnectionsLeave() {
+        let (controller, engine) = ended(keeping: false)
+        #expect(engine.flows.count == 1)
+        // Host, the process still connected, and its destination.
+        #expect(controller.frame(labelBudget: 0).nodes.count == 3)
+        #expect(controller.endedCount == 0)
+    }
+
+    @Test func whenKeptTheyStayButSubdued() throws {
+        let (controller, engine) = ended(keeping: true)
+        // The engine has forgotten it; the graph has not.
+        #expect(engine.flows.count == 1)
+        let frame = controller.frame(labelBudget: 0)
+        #expect(frame.nodes.count == 5)
+        #expect(controller.endedCount == 1)
+
+        // Its line is dimmer than a live one and carries no pulses.
+        let live = try #require(frame.edges.first { $0.p1 == frame.nodes[4].center || $0.p0 == frame.nodes[4].center })
+        let gone = try #require(frame.edges.first { $0.p1 == frame.nodes[3].center || $0.p0 == frame.nodes[3].center })
+        #expect(gone.glow < live.glow * 0.5)
+        #expect(gone.pulse == 0)
+        // And its process is dimmer than the one still connected.
+        #expect(frame.nodes[1].intensity < frame.nodes[2].intensity)
+
+        let info = try #require(controller.info(for: .node(.process(1))))
+        #expect(info.title == "app1")
+        #expect(info.rows.first { $0.label == "Connections" }?.value == "0 open, 1 ended")
+        #expect(controller.flows(for: .node(.endpoint(IPAddress("1.1.1.1")!))).first?.state == .closed)
+    }
+
+    @Test func turningItOffForgetsThem() {
+        let (controller, _) = ended(keeping: true)
+        controller.keepsEnded = false
+        #expect(controller.frame(labelBudget: 0).nodes.count == 3)
+        #expect(controller.endedCount == 0)
+        // Turning it back on does not bring them back.
+        controller.keepsEnded = true
+        #expect(controller.frame(labelBudget: 0).nodes.count == 3)
+    }
+
+    @Test func canBeClearedWithoutLeavingTheMode() {
+        let (controller, _) = ended(keeping: true)
+        controller.clearEnded()
+        #expect(controller.keepsEnded)
+        #expect(controller.frame(labelBudget: 0).nodes.count == 3)
+    }
+
+    @Test func respectsTheFilter() throws {
+        let (controller, _) = ended(keeping: true)
+        controller.filter = try FlowFilter("pid=2")
+        #expect(controller.frame(labelBudget: 0).nodes.count == 3)
+        controller.filter = try FlowFilter("state:closed")
+        #expect(controller.frame(labelBudget: 0).nodes.count == 3)
+        #expect(controller.flows(for: .node(.host)).map(\.pid) == [1])
+    }
+
+    @Test func doesNotShowAsEndedWhatHadNotEndedYet() {
+        let engine = FlowEngine()
+        let controller = GraphController()
+        controller.keepsEnded = true
+        engine.ingest([flow(pid: 1, remote: "1.1.1.1", id: 1)], from: "test", at: 0)
+        engine.ingest([], from: "test", at: 5)
+        let before = engine.snapshot()
+        controller.update(before, time: 5)
+        engine.ingest([.removed(sourceID: 1)], from: "test", at: 10)
+        controller.update(engine.snapshot(), time: 10)
+        engine.ingest([], from: "test", at: 100)
+        controller.update(engine.snapshot(), time: 100)
+        #expect(controller.endedCount == 1)
+
+        // Scrubbed back to before it closed, the connection is shown open, once.
+        controller.hold(before)
+        let flows = controller.flows(for: .node(.host))
+        #expect(flows.count == 1)
+        #expect(flows.first?.state != .closed)
+    }
+
+    @Test func remembersOnlySoMany() {
+        let engine = FlowEngine()
+        let controller = GraphController()
+        controller.keepsEnded = true
+        let total = GraphController.endedLimit + 200
+        let local = IPAddress("10.0.0.2")!
+        var opened: [SourceEvent] = []
+        var removed: [SourceEvent] = []
+        for index in 0..<total {
+            let id = UInt64(index + 1)
+            let localPort = UInt16(1024 + index % 60_000)
+            let remote = Endpoint(address: IPAddress.v4(0x0800_0000 + UInt32(index)), port: 443)
+            let observation = SocketObservation(
+                sourceID: id, proto: .tcp, local: Endpoint(address: local, port: localPort), remote: remote,
+                pid: 1, processName: "app", tcpState: .established)
+            opened.append(.seen(observation))
+            removed.append(.removed(sourceID: id))
+        }
+        engine.ingest(opened, from: "test", at: 0)
+        engine.ingest(removed, from: "test", at: 1)
+        controller.update(engine.snapshot(), time: 1)
+        #expect(controller.endedCount == GraphController.endedLimit)
+    }
+}

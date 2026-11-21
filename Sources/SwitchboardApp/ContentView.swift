@@ -94,6 +94,10 @@ private struct GraphStatus: View {
             if model.focused {
                 Text("FOCUS — press esc or double-click empty space to release").foregroundStyle(Color.caution)
             }
+            if model.keepEnded {
+                Text("KEEPING ENDED CONNECTIONS — \(model.endedCount) shown dimmed · press E to turn off")
+                    .foregroundStyle(Color.dim)
+            }
         }
         .font(.mono(11))
         .padding(12)
@@ -291,6 +295,14 @@ struct TopBar: View {
             .frame(width: 210)
             .help("How much motion and glow to use. The data shown is the same.")
 
+            Toggle(isOn: Binding(get: { model.keepEnded }, set: { model.setKeepEnded($0) })) {
+                Image(systemName: "clock.arrow.circlepath")
+            }
+            .toggleStyle(.button)
+            .help("Keep ended connections on the graph, subdued, instead of letting them fade away (E)")
+            .contextMenu {
+                Button("Forget ended connections") { model.clearEnded() }
+            }
             Button { model.showPanel.toggle() } label: { Image(systemName: "rectangle.bottomthird.inset.filled") }
                 .help("Show or hide the panels (B)")
             Button { model.showInspector.toggle() } label: { Image(systemName: "sidebar.right") }

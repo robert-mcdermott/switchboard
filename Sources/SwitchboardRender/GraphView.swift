@@ -13,7 +13,7 @@ public final class GraphSession: NSObject, MTKViewDelegate {
     }
 
     public enum Key: Sendable {
-        case togglePause, cycleProfile, resetView, focusFilter, toggleInspector, togglePanel, escape
+        case togglePause, cycleProfile, resetView, focusFilter, toggleInspector, togglePanel, escape, toggleKeepEnded
     }
 
     public enum ContextAction: Sendable {
@@ -327,6 +327,7 @@ final class GraphMTKView: MTKView {
         case "0": session?.key(.resetView)
         case "/": session?.key(.focusFilter)
         case "i", "I": session?.key(.toggleInspector)
+        case "e", "E": session?.key(.toggleKeepEnded)
         case "b", "B": session?.key(.togglePanel)
         case "\u{1B}": session?.key(.escape)
         default: super.keyDown(with: event)

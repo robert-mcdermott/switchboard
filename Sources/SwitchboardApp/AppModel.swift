@@ -125,6 +125,9 @@ final class AppModel {
     /// Everything pinned in the inspector. ⌘-click adds to it.
     var selection = Set<PickTarget>()
     var focused = false
+    /// Ended connections stay on the graph, subdued, instead of fading away.
+    private(set) var keepEnded = UserDefaults.standard.bool(forKey: "keepEnded")
+    private(set) var endedCount = 0
 
     // Time: `nil` means the present.
     private(set) var scrubTime: EngineTime?
@@ -209,9 +212,12 @@ final class AppModel {
             case .toggleInspector: showInspector.toggle()
             case .togglePanel: showPanel.toggle()
             case .escape: focused = false
+            case .toggleKeepEnded: setKeepEnded(!keepEnded)
             }
         }
         applySettings()
+        if arguments.contains("--keep-ended") { keepEnded = true }
+        controller.keepsEnded = keepEnded
 
         do {
             let epoch = CACurrentMediaTime()
@@ -264,6 +270,20 @@ final class AppModel {
     }
 
     // MARK: - Actions
+
+    func setKeepEnded(_ on: Bool) {
+        keepEnded = on
+        session.controller.keepsEnded = on
+        UserDefaults.standard.set(on, forKey: "keepEnded")
+        endedCount = session.controller.endedCount
+        deriveInspector()
+    }
+
+    func clearEnded() {
+        session.controller.clearEnded()
+        endedCount = 0
+        deriveInspector()
+    }
 
     /// Pausing is scrubbing to this moment and staying there.
     func togglePause() {
@@ -487,6 +507,7 @@ final class AppModel {
     func refresh() {
         frames = session.stats.summary()
         focused = session.controller.focus != nil
+        endedCount = keepEnded ? session.controller.endedCount : 0
     }
 
     private func receive(_ snapshot: EngineSnapshot) {
@@ -685,6 +706,8 @@ final class AppModel {
             "inspectorTitle": inspector?.title ?? "",
             "inspectorRows": inspectorRows.count,
             "scrubbedTo": scrubTime ?? -1,
+            "keepEnded": keepEnded,
+            "endedKept": session.controller.endedCount,
             "scanSockets": scan?.sockets ?? -1,
             "scanProcesses": scan?.processes.count ?? -1,
             "historySeconds": timeRange.map { $0.upperBound - $0.lowerBound } ?? 0,

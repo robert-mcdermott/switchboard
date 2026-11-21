@@ -102,6 +102,8 @@ The first draft of the colour-safe palette was no better than the standard one: 
 
 **The table holds at most 1,500 rows,** the busiest, with a notice when the cap applies.
 
+**Ended connections can be kept on screen.** By default a connection fades out over six seconds once it closes. With "keep ended connections" on (the clock button in the top bar, or E), it stays instead, at about a fifth of its brightness and with no pulses, and a process whose connections have all ended is dimmer than one that is merely quiet. This is off by default and remembered between launches. Remembering starts when the mode is turned on and is dropped when it is turned off; right-click the button to forget what has accumulated without leaving the mode. At most 3,000 ended connections are kept, oldest dropped first. They obey the filter (`state:closed` shows only them), appear in the inspector, and are not shown as ended when scrubbing back to a time before they closed. The Connections table still lists open connections only.
+
 ## Using it
 
 | Do this | To |
@@ -114,6 +116,7 @@ The first draft of the colour-safe palette was no better than the standard one: 
 | Right-click a node or line | Filter, focus, copy, reveal in Finder, expand or collapse a network |
 | Drag the timeline, or press space | Go back in time, or hold this moment. LIVE returns |
 | Click a column header; right-click the header | Sort; show, hide, and reorder columns |
+| `E`, or the clock button | Keep ended connections on the graph, dimmed |
 | `I`, `B`, `P`, `0` | Inspector, panels, profile, reset view |
 
 ## Carried forward
