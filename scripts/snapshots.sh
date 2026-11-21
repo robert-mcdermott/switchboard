@@ -23,7 +23,7 @@ mkdir -p "$OUT" "$GOLDEN"
 status=0
 # name, scenario, and layout of each reference picture.
 for entry in "quiet quiet constellation" "developer developer constellation" "stress stress constellation" \
-             "flow developer flow" "lanes developer lanes"; do
+             "flow developer flow" "lanes developer lanes" "globe developer globe" "hierarchy developer hierarchy"; do
   set -- $entry
   name="$1"; scenario="$2"; layout="$3"
   "$APP" --snapshot "$OUT/$name.png" --source "sim:$scenario" --layout "$layout" --at 20 --size 1200x750 >/dev/null

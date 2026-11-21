@@ -60,6 +60,6 @@ public enum SourceSpec {
     /// Simulated and replayed processes do not exist, so there is nothing to look up.
     public static func resolver(for resolved: Resolved) -> any ProcessResolver {
         if let collector = resolved.collector { return collector }
-        return resolved.simulated ? PassthroughProcessResolver() : LibProcResolver()
+        return resolved.simulated ? SimulatedProcessResolver() : LibProcResolver()
     }
 }

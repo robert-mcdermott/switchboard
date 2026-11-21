@@ -39,7 +39,7 @@ struct Configuration: Codable {
     /// The settings that travel. The log's location and the window's size do not.
     static let keys = [
         "clustering", "clusterThreshold", "palette", "historyMinutes", "profile", "hostnames", "logging", "tagLists",
-        "logDetail", "logDays", "logMegabytes", "layout", "lanesMinutes", "keepEnded",
+        "logDetail", "logDays", "logMegabytes", "layout", "lanesMinutes", "keepEnded", "homeLocation",
     ]
 
     static func current(workspaces: [Workspace], defaults: UserDefaults = .standard) -> Configuration {

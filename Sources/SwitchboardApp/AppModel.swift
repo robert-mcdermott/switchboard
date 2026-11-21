@@ -470,6 +470,7 @@ final class AppModel {
         let minutes = defaults.object(forKey: "historyMinutes") as? Double ?? 15
         window.maximumAge = max(minutes, 1) * 60
         session.controller.lanesWindow = max(defaults.object(forKey: "lanesMinutes") as? Double ?? 10, 0.5) * 60
+        session.controller.home = (defaults.string(forKey: "homeLocation")).flatMap(GeoPoint.init) ?? GeoPoint.guess()
     }
 
     /// What the command line asked for that needs the window to exist first.
@@ -505,13 +506,20 @@ final class AppModel {
 
     /// Loads location databases and the user's address lists, and hands them to the engine.
     private func loadEnrichment() {
+        // Settings are first applied before the feed exists; there is nothing to hand the
+        // databases to yet, and marking them loaded then would mean they never are.
+        guard feed != nil else { return }
         let text = UserDefaults.standard.string(forKey: "tagLists") ?? ""
-        guard text != loadedTags || !enrichmentLoaded else { return }
-        loadedTags = text
+        // Simulated traffic gets invented places; that is decided once the feed exists.
+        let key = text + (simulated ? "\u{0}simulated" : "")
+        guard key != loadedTags || !enrichmentLoaded else { return }
+        loadedTags = key
         enrichmentLoaded = true
         let parsed = TagList.parse(text)
         tagProblems = parsed.problems
-        let loaded = GeoDatabase.load(directory: Self.geoDirectory, tags: parsed.lists)
+        let loaded = simulated
+            ? (database: GeoDatabase(tags: parsed.lists, fallback: SimulatedGeography()), problems: [String]())
+            : GeoDatabase.load(directory: Self.geoDirectory, tags: parsed.lists)
         var colors: [String: SIMD3<Float>] = [:]
         for list in parsed.lists {
             guard let hex = list.color.flatMap({ UInt32($0.dropFirst(), radix: 16) }) else { continue }
@@ -575,6 +583,11 @@ final class AppModel {
         select(session.controller.target(pid: Int32(row.pid), remote: row.key.remote, proto: row.key.proto))
     }
 
+    /// A filter that selects what a node or edge stands for, in whichever layout it is.
+    func filterExpression(for target: PickTarget) -> String? {
+        session.controller.filterHint(for: target) ?? Self.filterText(for: target)
+    }
+
     static func filterText(for target: PickTarget) -> String? {
         switch target {
         case .node(.process(let pid)), .edge(.host, .process(let pid)): "pid=\(pid)"
@@ -598,7 +611,7 @@ final class AppModel {
 
     /// Narrows everything to the selection. Several items are joined with OR.
     func filterToSelection() {
-        let parts = selection.compactMap(Self.filterText(for:)).sorted()
+        let parts = selection.compactMap(filterExpression(for:)).sorted()
         guard !parts.isEmpty else { return }
         filterText = parts.count == 1 ? parts[0] : parts.map { "(\($0))" }.joined(separator: " OR ")
         applyFilter()
@@ -828,7 +841,7 @@ final class AppModel {
     private func perform(_ action: GraphSession.ContextAction, on target: PickTarget) {
         switch action {
         case .filterToThis:
-            filterText = Self.filterText(for: target) ?? ""
+            filterText = filterExpression(for: target) ?? ""
             applyFilter()
         case .focusOnThis:
             focused = true

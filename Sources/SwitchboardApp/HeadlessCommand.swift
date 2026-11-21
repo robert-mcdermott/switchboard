@@ -54,7 +54,11 @@ enum HeadlessCommand {
                 return 2
             }
             let engine = FlowEngine(resolver: SourceSpec.resolver(for: resolved))
+            // Simulated addresses get invented places, and home is fixed, so the picture is
+            // the same on every machine and in every time zone.
+            engine.enricher = SimulatedGeography()
             let controller = GraphController()
+            controller.home = GeoPoint(latitude: 47.61, longitude: -122.33)
             if let layout = value("--layout") {
                 guard let chosen = GraphLayout(rawValue: layout) else {
                     print("--layout must be one of: \(GraphLayout.allCases.map(\.rawValue).joined(separator: ", "))")

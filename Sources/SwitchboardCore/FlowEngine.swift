@@ -380,6 +380,8 @@ public final class FlowEngine {
         flow.asn = facts.asn
         flow.org = facts.org
         flow.tags = facts.tags
+        flow.latitude = facts.latitude
+        flow.longitude = facts.longitude
     }
 
     /// Looks every connection up again, after a database or the tag lists have changed.

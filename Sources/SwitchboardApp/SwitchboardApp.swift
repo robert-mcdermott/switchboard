@@ -64,6 +64,11 @@ struct SwitchboardApp: App {
 }
 
 struct SettingsView: View {
+    static var guessedHome: String {
+        let point = GeoPoint.guess()
+        return String(format: "%.2f, %.2f (from the time zone)", point.latitude, point.longitude)
+    }
+
     @AppStorage("clustering") private var clustering = "automatic"
     @AppStorage("clusterThreshold") private var clusterThreshold = 300
     @AppStorage("palette") private var palette = "standard"
@@ -73,6 +78,7 @@ struct SettingsView: View {
     @AppStorage("logging") private var logging = true
     @AppStorage("tagLists") private var tagLists = ""
     @AppStorage("lanesMinutes") private var lanesMinutes = 10.0
+    @AppStorage("homeLocation") private var homeLocation = ""
     @AppStorage("logDetail") private var logDetail = "standard"
     @AppStorage("logDays") private var logDays = 30.0
     @AppStorage("logMegabytes") private var logMegabytes = 2000.0
@@ -128,6 +134,14 @@ struct SettingsView: View {
                 Text("Country, city, and network owner come from database files in\n~/Library/Application Support/Switchboard/GeoIP. Switchboard never downloads them; run scripts/fetch-geoip.sh to fetch the free DB-IP Lite databases (IP Geolocation by DB-IP, CC BY 4.0), then restart.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+            Section("Globe") {
+                TextField("Where this Mac is", text: $homeLocation, prompt: Text(Self.guessedHome))
+                Text(GeoPoint(homeLocation) != nil || homeLocation.isEmpty
+                    ? "Latitude and longitude, such as 47.61, -122.33. Left empty, it is guessed from the time zone; Switchboard never asks the network where it is."
+                    : "Not a latitude and longitude. Write it as 47.61, -122.33.")
+                    .font(.caption)
+                    .foregroundStyle(GeoPoint(homeLocation) != nil || homeLocation.isEmpty ? Color.secondary : Color.orange)
             }
             Section("Lanes layout") {
                 Picker("Time shown", selection: $lanesMinutes) {

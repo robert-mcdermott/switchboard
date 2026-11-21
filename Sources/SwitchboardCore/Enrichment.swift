@@ -166,10 +166,15 @@ public final class GeoDatabase: AddressEnricher, @unchecked Sendable {
     /// The database types loaded, for display.
     public let sources: [String]
 
-    public init(readers: [MMDBReader] = [], tags: [TagList] = []) {
+    /// Asked for what the databases do not know. Used to give simulated addresses
+    /// invented places, so a simulation looks like a real machine.
+    private let fallback: (any AddressEnricher)?
+
+    public init(readers: [MMDBReader] = [], tags: [TagList] = [], fallback: (any AddressEnricher)? = nil) {
         self.readers = readers
         self.tags = tags
-        sources = readers.map(\.databaseType)
+        self.fallback = fallback
+        sources = readers.map(\.databaseType) + (fallback == nil ? [] : ["invented places for simulated traffic"])
     }
 
     /// Loads every `.mmdb` file in a folder. Files that cannot be read are skipped and named.
@@ -183,7 +188,7 @@ public final class GeoDatabase: AddressEnricher, @unchecked Sendable {
         return (GeoDatabase(readers: readers, tags: tags), problems)
     }
 
-    public var isEmpty: Bool { readers.isEmpty && tags.isEmpty }
+    public var isEmpty: Bool { readers.isEmpty && tags.isEmpty && fallback == nil }
     public var tagLists: [TagList] { tags }
 
     public func facts(for address: IPAddress) -> AddressFacts {
@@ -207,6 +212,12 @@ public final class GeoDatabase: AddressEnricher, @unchecked Sendable {
                     facts.asn = UInt32(truncatingIfNeeded: number)
                 }
                 if facts.org == nil { facts.org = record["autonomous_system_organization"]?.string }
+            }
+            if facts.country == nil, facts.asn == nil, let fallback {
+                let invented = fallback.facts(for: address)
+                let tags = facts.tags
+                facts = invented
+                facts.tags = tags
             }
         }
         lock.withLock {

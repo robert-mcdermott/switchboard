@@ -5,9 +5,14 @@ import simd
 
 @testable import SwitchboardRender
 
-private func simulated(_ layout: GraphLayout, scenario: SimulatorSource.Scenario = .developer, until end: Double = 40) -> (GraphController, FlowEngine) {
+private func simulated(
+    _ layout: GraphLayout, scenario: SimulatorSource.Scenario = .developer, until end: Double = 40, places: Bool = false
+) -> (GraphController, FlowEngine) {
     let engine = FlowEngine()
+    // The globe has nothing to draw arcs to without places.
+    if places { engine.enricher = SimulatedGeography() }
     let controller = GraphController()
+    controller.home = GeoPoint(latitude: 47.61, longitude: -122.33)
     controller.layout = layout
     controller.lanesWindow = 60
     SteppedRun.run(sources: [SimulatorSource(scenario: scenario)], engine: engine, until: end) { time in
@@ -257,7 +262,7 @@ private func node(_ id: NodeID, in controller: GraphController) -> NodeInstance?
 
     @Test func theFilterAppliesInEveryLayout() throws {
         for layout in GraphLayout.allCases {
-            let (controller, _) = simulated(layout)
+            let (controller, _) = simulated(layout, places: true)
             let all = controller.frame(labelBudget: 0)
             controller.filter = try FlowFilter("process:brave")
             controller.settle()

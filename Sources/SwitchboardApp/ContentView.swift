@@ -330,11 +330,13 @@ struct TopBar: View {
                 Image(systemName: "circle.hexagongrid").tag(GraphLayout.constellation).help("Constellation (1)")
                 Image(systemName: "arrow.triangle.branch").tag(GraphLayout.flow).help("Flow: processes, services, owners (2)")
                 Image(systemName: "chart.bar.doc.horizontal").tag(GraphLayout.lanes).help("Lanes: each connection over time (3)")
+                Image(systemName: "globe").tag(GraphLayout.globe).help("Globe: where destinations are (4)")
+                Image(systemName: "list.bullet.indent").tag(GraphLayout.hierarchy).help("Hierarchy: account, process, domain, address (5)")
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(width: 110)
-            .help("How the connections are arranged: constellation (1), flow (2), lanes over time (3)")
+            .frame(width: 180)
+            .help("How the connections are arranged: constellation (1), flow (2), lanes (3), globe (4), hierarchy (5)")
 
             Picker("Profile", selection: Binding(get: { model.profile }, set: { model.setProfile($0) })) {
                 ForEach(RenderProfile.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }

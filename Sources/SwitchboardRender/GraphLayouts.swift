@@ -20,6 +20,11 @@ extension GraphController {
         var now: EngineTime
         var window: Double
         var tagColors: [String: SIMD3<Float>]
+        var remotes: [NodeID: Aggregate]
+        var members: [NodeID: [IPAddress]]
+        var groupLabels: [NodeID: String]
+        var home: GeoPoint
+        var globeView: GlobeView
     }
 
     struct LayoutScene {
@@ -33,6 +38,10 @@ extension GraphController {
         var members: [NodeID: [IPAddress]] = [:]
         var labels: [NodeID: String] = [:]
         var nodeFor: [IPAddress: NodeID] = [:]
+        var globeLines: [GlobeLine] = []
+        var connectionNodes: [AddressEdge: NodeID] = [:]
+        /// Filter expressions that select what a node stands for, where the app cannot work it out.
+        var filters: [NodeID: String] = [:]
     }
 
     /// At most this many processes and destinations get a node of their own in the flow
@@ -52,7 +61,7 @@ extension GraphController {
         return parts.suffix(short ? 3 : 2).joined(separator: ".")
     }
 
-    private static func processNode(
+    static func processNode(
         _ input: LayoutInput, pid: Int32, aggregate: Aggregate, anchor: SIMD2<Float>, radius: Float, bornAt: Float
     ) -> Node {
         let record = input.processes[pid]

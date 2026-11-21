@@ -24,6 +24,10 @@ public enum GraphLayout: String, Sendable, CaseIterable {
     case flow
     /// One row per process, time running left to right, a bar for each connection.
     case lanes
+    /// Destinations where they are on the Earth, with arcs from this Mac.
+    case globe
+    /// Account, process, domain, address, as a tree.
+    case hierarchy
 }
 
 public enum GroupKind: String, Hashable, Sendable {
@@ -35,6 +39,10 @@ public enum GroupKind: String, Hashable, Sendable {
     case domain
     /// Everything too small to have a node of its own.
     case rest
+    /// An account, keyed by user name.
+    case user
+    /// A place in the hierarchy, keyed by the path to it.
+    case path
 }
 
 public enum PickTarget: Hashable, Sendable {
@@ -133,6 +141,10 @@ public final class GraphController: @unchecked Sendable {
         var priority: Double
         var iconPath: String?
         var labelSide: Int?
+        /// Where on the Earth, as a unit vector, for the globe.
+        var globe: SIMD3<Float>?
+        /// 1 in full view, 0 behind the globe.
+        var visibility: Float = 1
     }
 
     /// A line that joins no nodes: one connection's lifetime in the lanes layout, or a rule.
@@ -165,8 +177,15 @@ public final class GraphController: @unchecked Sendable {
         var bend: Float
         /// How far the middle of the edge is drawn toward the centre, 0 to 1.
         var pull: Float = 0
+        /// A control point worked out elsewhere: the top of an arc over the globe.
+        var fixedControl: SIMD2<Float>?
+        /// How high an arc over the globe rises, as a fraction of its radius.
+        var lift: Float = 0
+        /// 1 in full view, 0 behind the globe.
+        var visibility: Float = 1
 
         func control(_ a: SIMD2<Float>, _ b: SIMD2<Float>) -> SIMD2<Float> {
+            if let fixedControl { return fixedControl }
             let along = b - a
             return (a + b) * 0.5 * (1 - pull) + SIMD2(-along.y, along.x) * bend
         }
@@ -238,6 +257,16 @@ public final class GraphController: @unchecked Sendable {
     private var bars: [Bar] = []
     private var halfSize: SIMD2<Float>?
     private var layoutMode = GraphLayout.constellation
+    /// The globe's lines of latitude and longitude and the land, in world space.
+    private var globeLines: [GlobeLine] = []
+    private var globeView = GlobeView()
+    /// Where this Mac is, for the globe.
+    private var homePoint = GeoPoint.guess() {
+        didSet { globeView.face(homePoint) }
+    }
+    /// Connections in the hierarchy are found on the leaf that stands for them.
+    private var connectionNodes: [AddressEdge: NodeID] = [:]
+    private var layoutFilters: [NodeID: String] = [:]
     private var index: [NodeID: Int] = [:]
     private var settled = false
     private var arrivals: [NodeID: (bornAt: Float, lastSeen: Float)] = [:]
@@ -291,6 +320,7 @@ public final class GraphController: @unchecked Sendable {
 
     public init(hostLabel: String = "THIS MAC") {
         self.hostLabel = hostLabel
+        globeView.face(homePoint)
     }
 
     // MARK: - What to show
@@ -342,6 +372,12 @@ public final class GraphController: @unchecked Sendable {
                 layoutMode = newValue
             }
         }
+    }
+
+    /// Where this Mac is on the globe.
+    public var home: GeoPoint {
+        get { lock.withLock { homePoint } }
+        set { change { homePoint = newValue } }
     }
 
     /// How much time the lanes layout shows, in seconds.
@@ -482,6 +518,8 @@ public final class GraphController: @unchecked Sendable {
         let fadeEnded = !self.keepEnded
         let showNames = self.showNames
         let tagColors = self.tagColors
+        let homePoint = self.homePoint
+        let globeViewNow = self.globeView
         let novel = self.novel.filter { time - $0.value < Self.novelSeconds }
         var ended = self.ended
         let previous = Dictionary(uniqueKeysWithValues: nodes.map { ($0.id, $0) })
@@ -626,12 +664,22 @@ public final class GraphController: @unchecked Sendable {
         var extraNodes: [NodeID: Aggregate] = [:]
         var extraEdges: [EdgeKey: Aggregate] = [:]
         var shownProcesses = byProcess.count
+        var globeLinesBuilt: [GlobeLine] = []
+        var connectionNodesBuilt: [AddressEdge: NodeID] = [:]
+        var filtersBuilt: [NodeID: String] = [:]
         if layoutMode != .constellation {
             let input = LayoutInput(
                 byProcess: byProcess, byAddressEdge: byAddressEdge, links: links, nodeFor: nodeFor, processes: processes,
                 listeners: listeners, scheme: scheme, previous: previous, hostLabel: hostLabel, now: snapshot.time,
-                window: lanesSeconds, tagColors: tagColors)
-            let scene = layoutMode == .flow ? Self.flowScene(input, born: born) : Self.lanesScene(input, born: born)
+                window: lanesSeconds, tagColors: tagColors, remotes: remotes, members: members, groupLabels: groupLabels,
+                home: homePoint, globeView: globeViewNow)
+            let scene: LayoutScene
+            switch layoutMode {
+            case .flow: scene = Self.flowScene(input, born: born)
+            case .lanes: scene = Self.lanesScene(input, born: born)
+            case .globe: scene = Self.globeScene(input, born: born)
+            default: scene = Self.hierarchyScene(input, born: born)
+            }
             built = scene.nodes
             drawn = scene.edges
             bars = scene.bars
@@ -642,7 +690,10 @@ public final class GraphController: @unchecked Sendable {
             shownProcesses = scene.processCount
             for (id, addresses) in scene.members { members[id] = addresses }
             for (id, label) in scene.labels { groupLabels[id] = label }
-            if layoutMode == .flow { nodeFor = scene.nodeFor }
+            if layoutMode == .flow || layoutMode == .globe { nodeFor = scene.nodeFor }
+            globeLinesBuilt = scene.globeLines
+            connectionNodesBuilt = scene.connectionNodes
+            filtersBuilt = scene.filters
             for (offset, node) in built.enumerated() { lookup[node.id] = offset }
         } else {
         built.reserveCapacity(byProcess.count + remotes.count + 1)
@@ -822,7 +873,11 @@ public final class GraphController: @unchecked Sendable {
         edges = drawn
         self.bars = bars
         self.halfSize = halfSize
-        layoutTargetsNodes = layoutMode == .flow
+        layoutTargetsNodes = layoutMode == .flow || layoutMode == .hierarchy
+        globeLines = globeLinesBuilt
+        connectionNodes = connectionNodesBuilt
+        layoutFilters = filtersBuilt
+        if layoutMode == .globe { reprojectGlobe() }
         nodesCollide = layoutMode == .constellation
         index = lookup
         extent = farthest + 90
@@ -875,6 +930,56 @@ public final class GraphController: @unchecked Sendable {
     }
 
     // MARK: - Layout
+
+    /// Turns the globe to where it should be at `time`, and puts everything on it in its
+    /// place. Called once a frame; does nothing in the other layouts. With `motion` off
+    /// the globe holds still, facing this Mac.
+    public func advance(time: Float, motion: Bool = true) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard layoutMode == .globe else { return }
+        // A slow sway either side of home, so this Mac never goes round the back.
+        let sway: Float = motion ? 0.6 * sin(time * 2 * .pi / 160) : 0
+        let wanted = globeView.homeLongitude + sway
+        guard abs(wanted - globeView.longitude) > 1e-5 else { return }
+        globeView.longitude = wanted
+        reprojectGlobe()
+    }
+
+    /// Projects every node, arc, and line of the globe for its current turn. Holds `lock`.
+    private func reprojectGlobe() {
+        for offset in nodes.indices {
+            guard let point = nodes[offset].globe else { continue }
+            let (position, facing) = globeView.project(point)
+            nodes[offset].anchor = position
+            nodes[offset].visibility = Self.smoothstep(-0.04, 0.16, facing)
+            if nodes[offset].id != .host { nodes[offset].labelSide = position.x >= globeView.center.x ? 1 : -1 }
+        }
+        for offset in edges.indices {
+            let from = nodes[edges[offset].from], to = nodes[edges[offset].to]
+            guard let a = from.globe else { continue }
+            guard let b = to.globe else {
+                // To the node for places unknown, below the globe: a plain line.
+                edges[offset].fixedControl = (from.anchor + to.anchor) * 0.5
+                continue
+            }
+            let (pa, fa) = globeView.project(a), (pb, fb) = globeView.project(b)
+            var middle = a + b
+            if simd_length(middle) < 1e-3 { middle = SIMD3(0, 1, 0) }
+            let top = simd_normalize(middle) * (1 + edges[offset].lift)
+            let (pm, _) = globeView.project(top)
+            // A quadratic curve through the top of the arc at its halfway point.
+            edges[offset].fixedControl = pm * 2 - (pa + pb) * 0.5
+            edges[offset].visibility = Self.smoothstep(-0.02, 0.18, min(fa, fb))
+        }
+        bars = globeView.lines(globeLines)
+        settled = false
+    }
+
+    static func smoothstep(_ low: Float, _ high: Float, _ value: Float) -> Float {
+        let t = min(max((value - low) / (high - low), 0), 1)
+        return t * t * (3 - 2 * t)
+    }
 
     /// One relaxation step: every node drifts to its anchor while overlapping nodes push apart.
     public func step() {
@@ -965,7 +1070,7 @@ public final class GraphController: @unchecked Sendable {
 
         for (offset, node) in nodes.enumerated() {
             var ring = node.ring
-            var intensity = node.intensity
+            var intensity = node.intensity * node.visibility
             if let inFocus, !inFocus.contains(offset) { intensity *= 0.18 }
             if highlightedNodes.contains(node.id) {
                 ring = SIMD4(1, 1, 1, 1)
@@ -980,8 +1085,8 @@ public final class GraphController: @unchecked Sendable {
 
         for edge in edges {
             let a = nodes[edge.from].position, b = nodes[edge.to].position
-            var glow = edge.glow
-            var pulse = edge.pulse
+            var glow = edge.glow * edge.visibility
+            var pulse = edge.pulse * edge.visibility
             var halfWidth = edge.halfWidth
             if let focusTarget, inFocus != nil, !Self.touches(edge, focusTarget, nodes) {
                 glow *= 0.1
@@ -1020,13 +1125,13 @@ public final class GraphController: @unchecked Sendable {
         // The host and every process are named; destinations compete for the remaining labels.
         if !nodes.isEmpty { frame.labels.append(LabelRequest(text: nodes[0].label, node: 0, kind: 0, side: nodes[0].labelSide)) }
         let named = (1..<min(processCount + 1, nodes.count)).sorted { nodes[$0].priority > nodes[$1].priority }
-        for offset in named.prefix(160) where inFocus?.contains(offset) ?? true {
+        for offset in named.prefix(160) where (inFocus?.contains(offset) ?? true) && nodes[offset].visibility > 0.5 {
             frame.labels.append(LabelRequest(text: nodes[offset].label, node: offset, kind: 1, side: nodes[offset].labelSide))
         }
         let destinations = nodes.indices.dropFirst(processCount + 1)
         // A column or an axis is short enough to label in full; only the constellation has to choose.
         let budget = nodesCollide || labelBudget == 0 ? labelBudget : max(labelBudget, 400)
-        var chosen = destinations.filter { nodes[$0].priority > 1 && (inFocus?.contains($0) ?? true) }
+        var chosen = destinations.filter { nodes[$0].priority > 1 && (inFocus?.contains($0) ?? true) && nodes[$0].visibility > 0.5 }
             .sorted { nodes[$0].priority > nodes[$1].priority }.prefix(budget).map { $0 }
         for highlight in highlights {
             let far: NodeID?
@@ -1044,9 +1149,15 @@ public final class GraphController: @unchecked Sendable {
 
     private static func touches(_ edge: Edge, _ target: PickTarget, _ nodes: [Node]) -> Bool {
         switch target {
-        case .node(.host): edge.target.isTrunk
-        case .node(let id): nodes[edge.from].id == id || nodes[edge.to].id == id
-        case .edge: edge.target == target
+        case .node(.host):
+            return edge.target.isTrunk
+        case .node(let id):
+            if nodes[edge.from].id == id || nodes[edge.to].id == id { return true }
+            // On the globe an arc is drawn from this Mac but belongs to a process.
+            if case .edge(let a, let b) = edge.target { return a == id || b == id }
+            return false
+        case .edge:
+            return edge.target == target
         }
     }
 
@@ -1071,6 +1182,17 @@ public final class GraphController: @unchecked Sendable {
         }
     }
 
+    /// A filter expression for something only this layout has, such as a branch of the
+    /// hierarchy. `nil` for the nodes and edges every layout shares.
+    public func filterHint(for target: PickTarget) -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        switch target {
+        case .node(let id): return layoutFilters[id]
+        case .edge(_, let to): return layoutFilters[to]
+        }
+    }
+
     public func process(_ pid: Int32) -> ProcessRecord? {
         lock.withLock { processes[pid] }
     }
@@ -1087,6 +1209,7 @@ public final class GraphController: @unchecked Sendable {
             }
             return peer.map { .edge($0.from, $0.to) } ?? .node(.process(pid))
         }
+        if let leaf = connectionNodes[AddressEdge(pid: pid, address: remote.address)] { return .node(leaf) }
         let far = nodeForAddress[remote.address] ?? .endpoint(remote.address)
         return layoutTargetsNodes ? .node(far) : .edge(.process(pid), far)
     }
@@ -1100,6 +1223,7 @@ public final class GraphController: @unchecked Sendable {
         var best: (target: PickTarget, distance: Float)?
         for node in nodes {
             if case .marker = node.id { continue }
+            if node.visibility < 0.4 { continue }
             let distance = simd_distance(node.position, point)
             if distance <= node.radius + slack, distance < (best?.distance ?? .infinity) {
                 best = (.node(node.id), distance)
@@ -1107,7 +1231,7 @@ public final class GraphController: @unchecked Sendable {
         }
         if let best { return best.target }
 
-        for edge in edges {
+        for edge in edges where edge.visibility > 0.4 {
             let a = nodes[edge.from].position, b = nodes[edge.to].position
             let control = edge.control(a, b)
             var nearest = Float.infinity
@@ -1250,6 +1374,16 @@ public final class GraphController: @unchecked Sendable {
             rows.insert(contentsOf: nameRows(aggregate) + Self.placeRows(aggregate), at: 0)
             return HoverInfo(title: "\(name(pid)) → \(far)", subtitle: "pid \(pid) · \(kind)", rows: rows, footnote: nil)
 
+        case .edge(let from, let to):
+            // Anything else joins two things only one layout has: name both ends.
+            func label(_ id: NodeID) -> String {
+                if case .process(let pid) = id { return name(pid) }
+                return groupLabels[id] ?? "\(id)"
+            }
+            var rows = trafficRows(aggregate)
+            rows.insert(.init(label: "Used by", value: Self.list(Set(aggregate.flows.map(\.pid)).sorted().map(name))), at: 0)
+            return HoverInfo(title: "\(label(from)) → \(label(to))", subtitle: "\(aggregate.total) connections", rows: rows, footnote: nil)
+
         default:
             return nil
         }
@@ -1353,7 +1487,9 @@ public final class GraphController: @unchecked Sendable {
         case .asn: "network owner"
         case .country: "country"
         case .domain: "domain"
-        case .rest: "size"
+        case .rest: "what is left"
+        case .user: "account"
+        case .path: "process and domain"
         }
     }
 

@@ -95,6 +95,7 @@ public final class GraphSession: NSObject, MTKViewDelegate {
               let commandBuffer = commandQueue.makeCommandBuffer()
         else { return }
 
+        controller.advance(time: time, motion: profile != .still)
         controller.step()
         var highlights = selection
         if let hoverTarget { highlights.insert(hoverTarget) }
@@ -336,6 +337,8 @@ final class GraphMTKView: MTKView {
         case "1": session?.key(.layout(1))
         case "2": session?.key(.layout(2))
         case "3": session?.key(.layout(3))
+        case "4": session?.key(.layout(4))
+        case "5": session?.key(.layout(5))
         case "k", "K": session?.key(.toggleKiosk)
         case "\u{1B}": session?.key(.escape)
         default: super.keyDown(with: event)

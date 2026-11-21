@@ -109,6 +109,9 @@ public struct Flow: Sendable, Codable, Identifiable {
     public var city: String?
     public var asn: UInt32?
     public var org: String?
+    /// Where the remote address is on the globe, in degrees, when a database says.
+    public var latitude: Double?
+    public var longitude: Double?
     /// The user's lists the remote address is on.
     public var tags: [String]
 
@@ -118,7 +121,8 @@ public struct Flow: Sendable, Codable, Identifiable {
         ageExact: Bool, bytesIn: UInt64, bytesOut: UInt64, packetsIn: UInt64, packetsOut: UInt64, rateIn: Double,
         rateOut: Double, rttMS: Double?, retransmittedBytes: UInt64?, service: String?, serviceBasis: ServiceBasis?,
         hostname: String?, hostnameSource: NameSource? = nil, attribution: String, country: String? = nil,
-        city: String? = nil, asn: UInt32? = nil, org: String? = nil, tags: [String] = []
+        city: String? = nil, asn: UInt32? = nil, org: String? = nil, tags: [String] = [], latitude: Double? = nil,
+        longitude: Double? = nil
     ) {
         self.id = id
         self.key = key
@@ -150,6 +154,8 @@ public struct Flow: Sendable, Codable, Identifiable {
         self.asn = asn
         self.org = org
         self.tags = tags
+        self.latitude = latitude
+        self.longitude = longitude
     }
 
     public var bytesTotal: UInt64 { bytesIn &+ bytesOut }

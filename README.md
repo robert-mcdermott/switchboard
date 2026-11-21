@@ -8,7 +8,7 @@ Switchboard draws this Mac in the centre, the programs using the network around 
 
 It is built to be watched on a wall and to be useful at a desk.
 
-> **Status: pre-release.** Milestones 0 to 6 of 8 are built, and the first half of 7. It runs and is used daily on the author's machine, but it is not packaged, not notarised, and has only been run on macOS 27 on Apple silicon. See [docs/ROADMAP.md](docs/ROADMAP.md).
+> **Status: pre-release.** Milestones 0 to 7 of 8 are built. It runs and is used daily on the author's machine, but it is not packaged, not notarised, and has only been run on macOS 27 on Apple silicon. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## What it shows
 
@@ -19,19 +19,25 @@ It is built to be watched on a wall and to be useful at a desk.
 - **History**: a log in SQLite that you can search with the same filter you use live, replay in the graph, and export as CSV or JSON lines.
 - **New things**: destinations this Mac has never talked to before are ringed and listed.
 
-## Three layouts
+## Five layouts
 
 | Key | Layout | Shows |
 |---|---|---|
 | **1** | Constellation | This Mac, its processes around it, destinations beyond |
 | **2** | Flow | Left to right by volume: processes, what the traffic is, who owns the far end |
 | **3** | Lanes | One row per process, a bar for each connection over time |
+| **4** | Globe | Destinations where they are, with arcs from this Mac (needs the location data below) |
+| **5** | Hierarchy | Account, process, domain, address, as a tree |
 
 The same things are selectable in each, and a selection carries across when you switch.
 
 ![The flow layout](docs/spikes/m7-flow.jpg)
 
 ![The lanes layout](docs/spikes/m7-lanes.jpg)
+
+![The globe](docs/spikes/m7-globe.jpg)
+
+![The hierarchy](docs/spikes/m7-hierarchy.jpg)
 
 ## What it does not do
 
@@ -98,6 +104,8 @@ scripts/fetch-geoip.sh
 
 Restart the app afterwards. The data is *IP Geolocation by DB-IP*, licensed CC BY 4.0.
 
+The globe also needs to know where this Mac is. It guesses from the time zone; set it exactly in Settings ▸ Globe. Switchboard never asks the network.
+
 ## Filtering
 
 One language filters the graph, the tables, and the log.
@@ -163,7 +171,7 @@ The second renders reference scenes and compares them with golden images.
 
 - Without the collector, roughly 5 to 8 percent of your own account's sockets are not reported by the system.
 - With the console panels open, the graph does not always hold 60 frames a second.
-- The globe and hierarchy views are not built yet.
+- The globe's coastlines are a coarse hand-drawn outline.
 - Kiosk mode has not had a long unattended run, and moving between displays is untested.
 - QUIC connections get names from DNS only, and encrypted DNS, ECH, and Private Relay all reduce what any observer on the machine can name.
 - No licence has been chosen yet.
