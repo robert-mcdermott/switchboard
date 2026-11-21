@@ -226,6 +226,8 @@ Choose *Save Current as Workspace…* to add your own. *Export Settings…* and 
 
 **macOS asks whether to reopen windows.** This happens after Switchboard was stopped while starting up. Choose either; it is harmless.
 
+**Received traffic looks too low in Full mode.** Builds before 21 November 2026 could miss half of all connections' received bytes after the collector had run for some hours. Reinstall the collector with `sudo scripts/install.sh`. The Health tab's NetworkStatistics line now says how many of the connections the kernel lists it is reporting, and how often it has renewed itself to keep that figure up.
+
 **It uses more CPU than I would like.** Switch to the Operator profile (**P**), which draws half as often. Hiding the panels (**B**) saves a little more.
 
 **After a macOS update something is missing.** Switchboard reads some interfaces Apple does not document. The Health tab shows each source and whether it is working; a broken one costs detail, not the whole app. Please report it with the Health tab's contents.

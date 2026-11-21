@@ -388,3 +388,56 @@ private func listener(_ id: UInt64, pid: Int32 = 100, address: String = "0.0.0.0
         #expect(a.processes.first?.signing == .unknown)
     }
 }
+
+/// Two sources reporting one socket, as the collector's NetworkStatistics and kernel socket
+/// list do: the better counter wins, whichever reported first.
+@Suite struct SourcePrecedenceTests {
+    /// A 10 MB/s download. The kernel's list sees it first, with no received bytes and the
+    /// acknowledgements going back counted as sent; NetworkStatistics has the real figures.
+    @Test func aDownloadFirstSeenByTheKernelListShowsItsTrueRate() throws {
+        let engine = FlowEngine()
+        engine.ingest([tcp(7, rx: 0, tx: 1_000)], from: "kernel", at: 0)
+        let id = try #require(engine.flows.values.first?.id)
+        var received: UInt64 = 0
+        for tick in 1...20 {
+            let time = Double(tick) * 0.25
+            received += 2_500_000
+            engine.ingest([tcp(41, rx: received, tx: 900)], from: "nstat", at: time)
+            engine.ingest([tcp(7, rx: 0, tx: 1_000 + UInt64(tick) * 25_000)], from: "kernel", at: time)
+        }
+        #expect(engine.flows.count == 1)
+        let flow = try #require(engine.flows[id])
+        #expect(flow.bytesIn == received)
+        #expect(flow.bytesOut == 900)
+        #expect(abs(flow.rateIn - 10_000_000) < 500_000, "\(flow.rateIn)")
+        #expect(flow.rateOut < 1)
+    }
+
+    @Test func theBetterSourceKeepsAFlowItSawFirst() throws {
+        let engine = FlowEngine()
+        engine.ingest([tcp(41, rx: 1_000, tx: 100)], from: "nstat", at: 0)
+        engine.ingest([tcp(7, rx: 0, tx: 5_000)], from: "kernel", at: 0)
+        engine.ingest([tcp(41, rx: 2_000, tx: 200)], from: "nstat", at: 1)
+        engine.ingest([tcp(7, rx: 0, tx: 9_000)], from: "kernel", at: 1)
+        #expect(engine.flows.count == 1)
+        let flow = try #require(engine.flows.values.first)
+        #expect(flow.bytesIn == 2_000 && flow.bytesOut == 200)
+    }
+
+    @Test func aSocketOnlyTheKernelListSeesStillShows() throws {
+        let engine = FlowEngine()
+        engine.ingest([tcp(7, rx: 0, tx: 5_000)], from: "kernel", at: 0)
+        engine.ingest([tcp(7, rx: 0, tx: 9_000)], from: "kernel", at: 1)
+        let flow = try #require(engine.flows.values.first)
+        #expect(flow.bytesOut == 9_000 && flow.state != .closed)
+    }
+
+    @Test func whenTheBetterSourceLetsGoTheFlowCloses() throws {
+        let engine = FlowEngine()
+        engine.ingest([tcp(7, rx: 0, tx: 5_000)], from: "kernel", at: 0)
+        engine.ingest([tcp(41, rx: 8_000, tx: 100)], from: "nstat", at: 0.5)
+        let id = try #require(engine.flows.values.first?.id)
+        engine.ingest([.removed(sourceID: 41)], from: "nstat", at: 1)
+        #expect(engine.flows[id]?.state == .closed)
+    }
+}

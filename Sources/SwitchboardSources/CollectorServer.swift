@@ -69,6 +69,9 @@ public final class CollectorServer: @unchecked Sendable {
     private let lock = NSLock()
     private var clients: [Client] = []
     private var current: [[UInt64: SocketObservation]]
+    /// Connections the kernel listed that NetworkStatistics had not reported, at the last check.
+    private var unreportedBefore = Set<SocketCoverage.Key>()
+    private var lastCoverageCheck: EngineTime?
     private var processes: [Int32: ProcessRecord] = [:]
     /// The latest names learned, so a client that connects later still gets them.
     private var recentNames: [CaptureObservation] = []
@@ -125,6 +128,7 @@ public final class CollectorServer: @unchecked Sendable {
 
     /// Polls every source once and publishes what changed.
     public func tick(now: EngineTime, includeHealth: Bool) {
+        checkCoverage(now: now)
         var frames: [[UInt8]] = []
         for (index, source) in sources.enumerated() {
             let events = source.poll(now: now)
@@ -163,6 +167,29 @@ public final class CollectorServer: @unchecked Sendable {
         }
         broadcast(frames, includeHealth: includeHealth)
     }
+
+    /// Every 30 seconds, compares the connections the kernel lists with those
+    /// NetworkStatistics has reported, and renews its subscription when it has gone stale.
+    private func checkCoverage(now: EngineTime) {
+        guard now - (lastCoverageCheck ?? -.infinity) >= SocketCoverage.interval else { return }
+        lastCoverageCheck = now
+        guard let statistics = sources.firstIndex(where: { $0 is NStatSource }),
+              let kernel = sources.firstIndex(where: { $0 is KernelSocketListSource }),
+              let source = sources[statistics] as? NStatSource else { return }
+        lock.lock()
+        let listed = Array(current[kernel].values), reported = Array(current[statistics].values)
+        lock.unlock()
+        let coverage = SocketCoverage(listed: listed, reported: reported, unreportedBefore: unreportedBefore)
+        unreportedBefore = coverage.unreported
+        source.coverageNote = coverage.summary
+        if coverage.isStale, now - (renewedAt ?? -.infinity) >= SocketCoverage.cooldown {
+            renewedAt = now
+            FileHandle.standardError.write(Data("switchboardd: renewing NetworkStatistics: \(coverage.summary)\n".utf8))
+            source.renew()
+        }
+    }
+
+    private var renewedAt: EngineTime?
 
     private func broadcast(_ frames: [[UInt8]], includeHealth: Bool) {
         lock.lock()
@@ -398,5 +425,51 @@ public final class CollectorServer: @unchecked Sendable {
             throw ServerError.socket("cannot serve \(path): \(reason)")
         }
         return fd
+    }
+}
+
+/// How much of what the kernel lists NetworkStatistics is reporting, and whether that has
+/// fallen far enough to renew its subscription.
+///
+/// Only established TCP connections count, and only those unreported at two checks in a
+/// row, so a connection that opened a moment ago and has not yet been described is not
+/// mistaken for one that was missed. Some connections are never reported by any
+/// subscription (docs/spikes/M1-findings.md), so a few percent is normal.
+public struct SocketCoverage: Sendable {
+    public struct Key: Hashable, Sendable {
+        var local: Endpoint
+        var remote: Endpoint
+        var pid: Int32
+    }
+
+    public static let interval: Double = 30
+    /// The least time between renewals.
+    public static let cooldown: Double = 300
+    /// Renew when at least this share of listed connections, and at least `minimum` of
+    /// them, have gone unreported for two checks.
+    public static let threshold = 0.15
+    public static let minimum = 5
+
+    public let listedCount: Int
+    public let unreported: Set<Key>
+    public let persistentlyUnreported: Int
+
+    public init(listed: [SocketObservation], reported: [SocketObservation], unreportedBefore: Set<Key>) {
+        func key(_ observation: SocketObservation) -> Key {
+            Key(local: observation.local, remote: observation.remote, pid: observation.pid)
+        }
+        let established = listed.filter { $0.proto == .tcp && $0.tcpState == .established }
+        let seen = Set(reported.map(key))
+        listedCount = established.count
+        unreported = Set(established.map(key)).subtracting(seen)
+        persistentlyUnreported = unreported.intersection(unreportedBefore).count
+    }
+
+    public var isStale: Bool {
+        persistentlyUnreported >= Self.minimum && Double(persistentlyUnreported) >= Self.threshold * Double(max(listedCount, 1))
+    }
+
+    public var summary: String {
+        "\(listedCount - unreported.count) of \(listedCount) established connections the kernel lists are reported"
     }
 }

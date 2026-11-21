@@ -10,6 +10,12 @@ public struct EngineConfiguration: Sendable {
     /// Flows first seen this soon after start, with no age from the source, already
     /// existed; their age is a lower bound.
     public var warmup = 3.0
+    /// How far each source's byte counters can be trusted, by source name; a source not
+    /// listed ranks 1. When two sources report one socket, the higher-ranked one's figures
+    /// are used, even if the other reported it first. The kernel's socket list reports no
+    /// received bytes (its counter runs at about twice the truth) and counts the
+    /// acknowledgements a download sends back as sent, so it ranks below NetworkStatistics.
+    public var counterRank: [String: Int] = ["kernel": 0]
 
     public init() {}
 }
@@ -109,6 +115,8 @@ public final class FlowEngine {
     }
 
     private var entries: [SourceKey: Entry] = [:]
+    /// Which source's report each open flow takes its figures from.
+    private var owners: [FlowID: SourceKey] = [:]
     private var meters: [FlowID: Meters] = [:]
     private var openFlowsByKey: [OwnedKey: FlowID] = [:]
     private var listenersByKey: [ListenerKey: FlowID] = [:]
@@ -228,8 +236,12 @@ public final class FlowEngine {
     private func open(_ observation: SocketObservation, sourceKey: SourceKey, delta: inout EngineDelta) {
         let flowKey = key(of: observation)
         let owned = OwnedKey(key: flowKey, pid: observation.pid)
-        if openFlowsByKey[owned] != nil {
-            entries[sourceKey] = .shadow
+        if let existing = openFlowsByKey[owned] {
+            if let owner = owners[existing], rank(sourceKey.source) > rank(owner.source) {
+                takeOver(existing, from: owner, by: sourceKey, with: observation)
+            } else {
+                entries[sourceKey] = .shadow
+            }
             return
         }
 
@@ -284,9 +296,40 @@ public final class FlowEngine {
         flows[id] = flow
         meters[id] = meter
         entries[sourceKey] = .flow(id)
+        owners[id] = sourceKey
         openFlowsByKey[owned] = id
         openedThisTick.insert(id)
         delta.opened.append(id)
+    }
+
+    private func rank(_ source: String) -> Int { configuration.counterRank[source] ?? 1 }
+
+    /// A better-counting source has reported a flow another source claimed first: the flow
+    /// keeps its identity and history, and from now on takes its figures from the new source.
+    /// Counters from two sources do not share a starting point, so the rate starts afresh.
+    private func takeOver(_ id: FlowID, from owner: SourceKey, by sourceKey: SourceKey, with observation: SocketObservation) {
+        guard var flow = flows[id] else { return }
+        entries[owner] = .shadow
+        entries[sourceKey] = .flow(id)
+        owners[id] = sourceKey
+        var meter = Meters()
+        _ = meter.rx.update(count: observation.rxBytes, at: now, halfLife: configuration.rateHalfLife)
+        _ = meter.tx.update(count: observation.txBytes, at: now, halfLife: configuration.rateHalfLife)
+        meters[id] = meter
+        flow.bytesIn = observation.rxBytes
+        flow.bytesOut = observation.txBytes
+        flow.packetsIn = observation.rxPackets
+        flow.packetsOut = observation.txPackets
+        flow.rateIn = 0
+        flow.rateOut = 0
+        flow.lastSeen = now
+        if let interface = observation.interface { flow.interface = interface }
+        if let rtt = observation.rttMS { flow.rttMS = rtt }
+        if !flow.ageExact, let age = observation.ageSeconds {
+            flow.firstSeen = now - age
+            flow.ageExact = true
+        }
+        flows[id] = flow
     }
 
     /// Returns false if the counters went backwards, meaning this is a different socket.
@@ -353,6 +396,7 @@ public final class FlowEngine {
             flow.rateOut = 0
             flows[id] = flow
             meters[id] = nil
+            owners[id] = nil
             openFlowsByKey[OwnedKey(key: flow.key, pid: flow.pid)] = nil
             delta.closed.append(id)
         case .listener(let id):
