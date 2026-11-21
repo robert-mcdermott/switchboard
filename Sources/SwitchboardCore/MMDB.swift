@@ -73,7 +73,7 @@ public struct MMDBReader: Sendable {
 
         init(copying data: Data) {
             let buffer = UnsafeMutableRawBufferPointer.allocate(byteCount: max(data.count, 1), alignment: 8)
-            data.copyBytes(to: buffer.bindMemory(to: UInt8.self))
+            _ = data.copyBytes(to: buffer.bindMemory(to: UInt8.self))
             bytes = UnsafeRawBufferPointer(rebasing: UnsafeRawBufferPointer(buffer)[0..<data.count])
             mapped = false
         }
