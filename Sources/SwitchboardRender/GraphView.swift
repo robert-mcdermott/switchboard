@@ -252,8 +252,14 @@ public final class GraphSession: NSObject {
 
     /// What VoiceOver says the graph shows. Set about once a second.
     public func setAccessibilitySummary(_ text: String) {
+        accessibilitySummary = text
         view?.setAccessibilityValue(text)
     }
+
+    /// What VoiceOver was last told, for checking without VoiceOver running.
+    public private(set) var accessibilitySummary = ""
+    public var accessibilityValueOnView: String? { view?.accessibilityValue() as? String }
+    public var accessibilityLabelOnView: String? { view?.accessibilityLabel() }
 
     /// The view's size in pixels, from the main thread, for the render thread.
     func setDrawableSize(_ size: CGSize, backing: Float) {

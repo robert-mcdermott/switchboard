@@ -1,3 +1,4 @@
+import SwiftUI
 import AppKit
 import Observation
 import SwitchboardCore
@@ -889,8 +890,8 @@ final class AppModel {
         if endedCount != ended { endedCount = ended }
         let busiest = talkers.prefix(3).map { "\($0.name), \(ByteFormat.rate($0.rate))" }.joined(separator: "; ")
         session.setAccessibilitySummary(
-            "\(layout.rawValue.capitalized) layout. \(statusLine.replacingOccurrences(of: "·", with: ",")). "
-                + (busiest.isEmpty ? "" : "Busiest: \(busiest)."))
+            "\(layout.rawValue.capitalized) layout. \(summary.flows) connections, receiving \(ByteFormat.rate(summary.rateIn)), "
+                + "sending \(ByteFormat.rate(summary.rateOut)). " + (busiest.isEmpty ? "" : "Busiest: \(busiest)."))
     }
 
     private func receive(_ snapshot: EngineSnapshot) {
@@ -1081,6 +1082,14 @@ final class AppModel {
     private func apply(_ derived: Derived, generation: Int, wantRows: Bool) {
         // A newer snapshot or filter has overtaken this one.
         guard generation == derivation else { return }
+        // Rows come and go every second; animating each one in and out was most of the
+        // main thread's work, and a live table reads better without the motion anyway.
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) { applyUnanimated(derived, wantRows: wantRows) }
+    }
+
+    private func applyUnanimated(_ derived: Derived, wantRows: Bool) {
         totalFlows = derived.totalFlows
         totalMatching = derived.totalMatching
         if wantRows {
@@ -1182,6 +1191,8 @@ final class AppModel {
             "source": sourceSpec,
             "profile": profile.rawValue,
             "layout": layout.rawValue,
+            "graphAccessibilityLabel": session.accessibilityLabelOnView ?? "",
+            "graphAccessibilityValue": session.accessibilityValueOnView ?? "",
             "kiosk": kiosk,
             "workspace": activeWorkspace ?? "",
             "workspaces": workspaces.map(\.name),
