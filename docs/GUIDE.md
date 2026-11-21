@@ -122,6 +122,8 @@ The globe faces this Mac and sways slowly either side of it. Drag it, or swipe w
 - **An amber ring**: signed by nobody in particular (normal for things you built or installed with Homebrew), or listening where other machines can reach it. The tooltip says which.
 - **A bright ring on a destination**: this Mac has never talked to it before, according to the log.
 
+Scroll or pinch to zoom. Zooming in spreads things apart much faster than it enlarges them, the way markers on a map stay small: at ten times the zoom, distances are ten times larger but dots and lines only about twice the size, so a crowded patch opens up instead of just getting bigger. **0** zooms back out.
+
 Hover for details, click to pin them in the inspector, ⌘-click to add to the selection, double-click to focus on a neighbourhood, right-click to filter to it, expand a group, or reveal a program in Finder.
 
 ### Profiles

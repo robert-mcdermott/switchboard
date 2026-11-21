@@ -90,7 +90,7 @@ enum HeadlessCommand {
             }
             try HeadlessRenderer.render(
                 controller, time: Float(at), width: size[0], height: size[1], profile: profile,
-                to: URL(fileURLWithPath: output))
+                zoom: value("--zoom").flatMap(Float.init) ?? 1, to: URL(fileURLWithPath: output))
             print("wrote \(output): \(engine.flows.count) flows at t=\(at) s, \(size[0])x\(size[1]), \(profile.rawValue)")
 
             if let describe = value("--describe") {

@@ -8,10 +8,22 @@ public struct Camera: Sendable, Equatable {
     public var center: SIMD2<Float>
     /// Pixels per world unit.
     public var scale: Float
+    /// Pixels per world unit for the size of things drawn: node radii and line widths.
+    /// The same as `scale` until someone zooms in; then sizes grow much more slowly than
+    /// distances, as markers on a map do, so zooming in separates what was crowded instead
+    /// of only magnifying it.
+    public var markScale: Float
 
-    public init(center: SIMD2<Float> = .zero, scale: Float = 1) {
+    public init(center: SIMD2<Float> = .zero, scale: Float = 1, markScale: Float? = nil) {
         self.center = center
         self.scale = scale
+        self.markScale = markScale ?? scale
+    }
+
+    /// How much sizes grow at a given zoom: with it when zooming out, by its 0.35th power
+    /// when zooming in (2.2 times at 10 times the zoom).
+    public static func markZoom(_ zoom: Float) -> Float {
+        zoom <= 1 ? zoom : pow(zoom, 0.35)
     }
 
     /// The scale at which a layout of the given radius just fits the view.
@@ -188,7 +200,7 @@ public final class GraphRenderer: @unchecked Sendable {
         var uniforms = Uniforms(
             viewport: SIMD2(Float(width), Float(height)), center: camera.center, scale: camera.scale, time: time,
             pulseGain: profile.pulseGain, bloom: profile.bloom * frame.bloomScale, grain: profile.grain, gridAlpha: frame.flatGrid ? profile.gridAlpha : 0,
-            backing: backing, field: SIMD4(frame.palette.field, 1), grid: SIMD4(frame.palette.grid, 1))
+            backing: backing, markScale: camera.markScale, field: SIMD4(frame.palette.field, 1), grid: SIMD4(frame.palette.grid, 1))
         let uniformLength = MemoryLayout<Uniforms>.stride
 
         // Icons and label textures are filled in on the way through.
@@ -293,7 +305,7 @@ public final class GraphRenderer: @unchecked Sendable {
             guard let entry = labels.entry(for: request.text, kind: request.kind) else { continue }
             let node = nodes[request.node]
             let size = entry.size * glyphScale
-            let radius = max(node.radius * camera.scale, 1.6 * backing)
+            let radius = max(node.radius * camera.markScale, 1.6 * backing)
             let reach = radius + 9 * backing
 
             var offset: SIMD2<Float>

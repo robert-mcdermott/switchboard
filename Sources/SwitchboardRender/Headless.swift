@@ -18,9 +18,11 @@ public enum HeadlessRenderer {
         }
     }
 
-    /// Draws `controller`'s current graph at `time` and writes it to `url`.
+    /// Draws `controller`'s current graph at `time` and writes it to `url`. With a `zoom`
+    /// over 1, the view is that much closer, centred on this Mac, as a person zooming in sees it.
     public static func render(
-        _ controller: GraphController, time: Float, width: Int, height: Int, profile: RenderProfile, to url: URL
+        _ controller: GraphController, time: Float, width: Int, height: Int, profile: RenderProfile, zoom: Float = 1,
+        to url: URL
     ) throws {
         guard let device = MTLCreateSystemDefaultDevice(), let queue = device.makeCommandQueue() else {
             throw HeadlessError.noDevice
@@ -40,7 +42,9 @@ public enum HeadlessRenderer {
         controller.settle()
         let frame = controller.frame(labelBudget: profile.labelBudget)
         let viewport = SIMD2(Float(width), Float(height))
-        let camera = Camera(center: .zero, scale: Camera.fitting(halfSize: frame.halfSize, viewport: viewport))
+        let fit = Camera.fitting(halfSize: frame.halfSize, viewport: viewport)
+        let center = zoom == 1 || frame.nodes.isEmpty ? SIMD2<Float>.zero : frame.nodes[0].center
+        let camera = Camera(center: center, scale: fit * zoom, markScale: fit * Camera.markZoom(zoom))
         renderer.render(frame, camera: camera, time: time, backing: 2, to: target, commandBuffer: commandBuffer)
         commandBuffer.commit()
         commandBuffer.waitUntilCompleted()

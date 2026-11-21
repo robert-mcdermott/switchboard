@@ -707,3 +707,35 @@ private struct TwoOwners: AddressEnricher {
         #expect(controller.flows(for: .node(.process(1))).count == 2)
     }
 }
+
+@Suite struct ZoomTests {
+    @Test func sizesGrowMoreSlowlyThanDistancesWhenZoomingIn() {
+        #expect(Camera.markZoom(1) == 1)
+        // Zooming out shrinks everything alike, as before.
+        #expect(Camera.markZoom(0.5) == 0.5)
+        // Zooming in, sizes grow far less than distances: about 2.2 times at 10 times.
+        #expect(abs(Camera.markZoom(10) - 2.24) < 0.01)
+        for zoom: Float in [1.5, 4, 10, 40] {
+            #expect(Camera.markZoom(zoom) < zoom && Camera.markZoom(zoom) > 1)
+        }
+        let camera = Camera(center: .zero, scale: 3)
+        #expect(camera.markScale == camera.scale)
+    }
+
+    @Test func pickingFollowsTheSizeThingsAreDrawn() throws {
+        let engine = FlowEngine()
+        engine.ingest([.seen(SocketObservation(
+            sourceID: 1, proto: .tcp, local: Endpoint(address: IPAddress("10.0.0.2")!, port: 40_001),
+            remote: Endpoint(address: IPAddress("8.8.8.8")!, port: 443), pid: 1, processName: "app1",
+            rxBytes: 5000, txBytes: 500, tcpState: .established))], from: "t", at: 0)
+        let controller = GraphController()
+        controller.clustering = .off
+        controller.update(engine.snapshot(), time: 0)
+        controller.settle()
+        let node = try #require(controller.frame(labelBudget: 0).nodes.first { $0.kind == 1 })
+        // Just inside the node's own radius picks it at full size, but not when it is drawn at a third.
+        let edge = node.center + SIMD2(node.radius * 0.9, 0)
+        #expect(controller.pick(at: edge, slack: 0) == .node(.process(1)))
+        #expect(controller.pick(at: edge, slack: 0, sizes: 1.0 / 3) != .node(.process(1)))
+    }
+}

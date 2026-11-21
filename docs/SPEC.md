@@ -400,7 +400,7 @@ Interaction:
 | Click | Pin to inspector |
 | Double-click | Focus: isolate the neighbourhood, dim the rest |
 | ⌘-click, lasso | Multi-select |
-| Pinch, scroll, drag | Zoom, pan |
+| Pinch, scroll, drag | Zoom, pan. Zooming in scales positions by the zoom but node radii and line widths by its 0.35th power (2.2 times at 10 times), so crowds separate; zooming out scales both alike. Picking uses the drawn sizes |
 | `/` | Jump to filter bar |
 | Space | Pause/resume the view (collection continues) |
 | Right-click | Copy as text or JSON, filter to this, hide, tag, reveal in Finder, look up (opens the browser; never automatic) |

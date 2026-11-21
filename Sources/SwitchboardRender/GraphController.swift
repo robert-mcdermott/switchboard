@@ -1550,7 +1550,9 @@ public final class GraphController: @unchecked Sendable {
     // MARK: - Picking
 
     /// What is at `point` (world units). `slack` widens small targets so they can be hit.
-    public func pick(at point: SIMD2<Float>, slack: Float) -> PickTarget? {
+    /// What is under `point`, in world units. `sizes` is how big things are drawn relative to
+    /// their own size: under 1 when zoomed in, where sizes grow more slowly than distances.
+    public func pick(at point: SIMD2<Float>, slack: Float, sizes: Float = 1) -> PickTarget? {
         lock.lock()
         defer { lock.unlock() }
         var best: (target: PickTarget, distance: Float)?
@@ -1558,7 +1560,7 @@ public final class GraphController: @unchecked Sendable {
             if case .marker = node.id { continue }
             if node.visibility < 0.4 { continue }
             let distance = simd_distance(node.position, point)
-            if distance <= node.radius + slack, distance < (best?.distance ?? .infinity) {
+            if distance <= node.radius * sizes + slack, distance < (best?.distance ?? .infinity) {
                 best = (.node(node.id), distance)
             }
         }
@@ -1575,14 +1577,14 @@ public final class GraphController: @unchecked Sendable {
                 nearest = min(nearest, Self.distance(from: point, toSegment: previous, next))
                 previous = next
             }
-            if nearest <= max(edge.halfWidth, slack), nearest < (best?.distance ?? .infinity) {
+            if nearest <= max(edge.halfWidth * sizes, slack), nearest < (best?.distance ?? .infinity) {
                 best = (edge.target, nearest)
             }
         }
         for bar in bars {
             guard let target = bar.target else { continue }
             let nearest = Self.distance(from: point, toSegment: bar.from, bar.to)
-            if nearest <= max(bar.halfWidth, slack), nearest < (best?.distance ?? .infinity) { best = (target, nearest) }
+            if nearest <= max(bar.halfWidth * sizes, slack), nearest < (best?.distance ?? .infinity) { best = (target, nearest) }
         }
         return best?.target
     }

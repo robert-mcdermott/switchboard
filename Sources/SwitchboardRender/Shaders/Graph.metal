@@ -16,7 +16,7 @@ struct Uniforms {
     float  grain;
     float  gridAlpha;
     float  backing;    // pixels per point
-    float  padding;
+    float  markScale;  // pixels per world unit for sizes, slower than scale when zoomed in
     float4 field;      // the theme's background
     float4 grid;       // the theme's graph paper
 };
@@ -118,7 +118,7 @@ vertex EdgeVertex edge_vertex(uint vertexID [[vertex_id]],
     float2 normal = float2(-tangent.y, tangent.x);
 
     // Width is set in pixels so a thin edge never vanishes when zoomed out.
-    float natural = edge.halfWidth * u.scale;
+    float natural = edge.halfWidth * u.markScale;
     float floorWidth = 0.7 * u.backing;
     float halfPixels = max(natural, floorWidth);
     // An edge held at its minimum width is drawn fainter instead, so a zoomed-out view of
@@ -175,7 +175,7 @@ vertex NodeVertex node_vertex(uint vertexID [[vertex_id]],
 {
     NodeInstance node = nodes[instanceID];
     float2 corner = float2(vertexID & 1, vertexID >> 1) * 2.0 - 1.0;
-    float radius = max(node.radius * u.scale, 1.6 * u.backing);
+    float radius = max(node.radius * u.markScale, 1.6 * u.backing);
     // Room around the disc for its glow, and, only while a node is new, for the ring that
     // marks its arrival. Keeping settled nodes small matters: with thousands on screen,
     // the area of these quads is most of what the GPU has to shade.

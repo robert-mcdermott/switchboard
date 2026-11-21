@@ -60,7 +60,8 @@ struct Uniforms {
     var gridAlpha: Float
     /// Pixels per point.
     var backing: Float
-    var padding: Float = 0
+    /// Pixels per world unit for sizes, which grow more slowly than distances when zoomed in.
+    var markScale: Float = 1
     /// The theme's background and graph-paper colours; the fourth component is unused.
     var field = SIMD4<Float>(5.0 / 255, 8.0 / 255, 15.0 / 255, 1)
     var grid = SIMD4<Float>(0.055, 0.102, 0.169, 1)

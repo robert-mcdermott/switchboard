@@ -24,7 +24,8 @@ final class RenderLoop: NSObject, @unchecked Sendable {
 
         var camera: Camera {
             let viewport = SIMD2(Float(drawableSize.width), Float(drawableSize.height))
-            return Camera(center: pan, scale: Camera.fitting(halfSize: halfSize, viewport: viewport) * userZoom)
+            let fit = Camera.fitting(halfSize: halfSize, viewport: viewport)
+            return Camera(center: pan, scale: fit * userZoom, markScale: fit * Camera.markZoom(userZoom))
         }
     }
 
@@ -357,9 +358,10 @@ public final class GraphSession: NSObject {
             }
             return
         }
+        let camera = self.camera
         let slack = 5 * backing / camera.scale
         hoverPoint = CGPoint(x: point.x, y: view.bounds.height - point.y)
-        let target = controller.pick(at: world(at: point), slack: slack)
+        let target = controller.pick(at: world(at: point), slack: slack, sizes: camera.markScale / camera.scale)
         if target != hoverTarget {
             hoverTarget = target
             refreshHover()
@@ -386,7 +388,8 @@ public final class GraphSession: NSObject {
     }
 
     func target(at point: CGPoint) -> PickTarget? {
-        controller.pick(at: world(at: point), slack: 5 * backing / camera.scale)
+        let camera = self.camera
+        return controller.pick(at: world(at: point), slack: 5 * backing / camera.scale, sizes: camera.markScale / camera.scale)
     }
 
     func click(at point: CGPoint, count: Int, extend: Bool) {
