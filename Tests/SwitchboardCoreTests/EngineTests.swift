@@ -349,3 +349,42 @@ private func listener(_ id: UInt64, pid: Int32 = 100, address: String = "0.0.0.0
         #expect(window.range == 2...2)
     }
 }
+
+@Suite struct HistoryMemoryTests {
+    private func snapshot(_ time: Double, flows: Int = 3) -> EngineSnapshot {
+        EngineSnapshot(time: time, wallClock: time, flows: [], listeners: [], processes: [], dns: [])
+    }
+
+    @Test func keepsEverySecondRecentlyAndEveryFiveBeforeThat() {
+        var window = TimeWindow(maximumAge: 3600)
+        for second in 0...1200 { window.append(snapshot(Double(second))) }
+        let times = window.snapshots.map(\.time)
+        // The last five minutes, every second.
+        let recent = times.filter { $0 >= 1200 - 300 }
+        #expect(recent.count == 301)
+        // Before that, five seconds apart or more, and never a gap much longer.
+        let older = times.filter { $0 < 1200 - 300 }
+        #expect(zip(older, older.dropFirst()).allSatisfy { $0.1 - $0.0 >= 5 && $0.1 - $0.0 <= 6 })
+        #expect(older.count >= 170 && older.count <= 181)
+        #expect(times.first == 0)
+        // Scrubbing still finds the moment at or before the one asked for.
+        #expect(window.snapshot(at: 402)?.time ?? -1 <= 402)
+        #expect(window.snapshot(at: 402)?.time ?? -1 >= 397)
+    }
+
+    @Test func snapshotsShareTheProcessListWhileItIsUnchanged() {
+        let engine = FlowEngine()
+        engine.ingest([.seen(SocketObservation(
+            sourceID: 1, proto: .tcp, local: Endpoint(address: IPAddress("10.0.0.2")!, port: 5000),
+            remote: Endpoint(address: IPAddress("1.1.1.1")!, port: 443), pid: 7, processName: "app", tcpState: .established))],
+            from: "t", at: 0)
+        let a = engine.snapshot(), b = engine.snapshot()
+        a.processes.withUnsafeBufferPointer { x in
+            b.processes.withUnsafeBufferPointer { y in #expect(x.baseAddress == y.baseAddress) }
+        }
+        engine.setSigning(pid: 7, status: .apple, teamID: nil)
+        let c = engine.snapshot()
+        #expect(c.processes.first?.signing == .apple)
+        #expect(a.processes.first?.signing == .unknown)
+    }
+}

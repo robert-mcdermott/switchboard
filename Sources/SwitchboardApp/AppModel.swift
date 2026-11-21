@@ -231,6 +231,10 @@ final class AppModel {
     // Time: `nil` means the present.
     private(set) var scrubTime: EngineTime?
     private(set) var timeRange: ClosedRange<EngineTime>?
+    /// What the menu bar menu shows: the totals and the top three talkers, every five seconds.
+    private(set) var menuLines: [String] = []
+    @ObservationIgnored private var menuUpdated = Date.distantPast
+    @ObservationIgnored private var summaryUpdated = Date.distantPast
     private(set) var displayedWallClock: Double = 0
     var paused: Bool { scrubTime != nil || logMoment != nil }
 
@@ -294,6 +298,7 @@ final class AppModel {
     @ObservationIgnored private var scrubRequest: Double?
     @ObservationIgnored private var logMomentRequest: Double?
     @ObservationIgnored private var derivation = 0
+    @ObservationIgnored private var lastDerived = Date.distantPast
     @ObservationIgnored private var startupWorkspace: String?
     @ObservationIgnored private var startupKiosk = false
     @ObservationIgnored private var startupDisplay: Int?
@@ -368,7 +373,7 @@ final class AppModel {
                 collectorPath: value("--collector-socket") ?? Switchboard.collectorSocketPath, controller: controller,
                 clock: { Float(CACurrentMediaTime() - epoch) },
                 onSummary: { [weak self] summary in
-                    Task { @MainActor in self?.summary = summary }
+                    Task { @MainActor in self?.receiveSummary(summary) }
                 },
                 onSnapshot: { [weak self] snapshot in
                     Task { @MainActor in self?.receive(snapshot) }
@@ -867,8 +872,11 @@ final class AppModel {
 
     func refresh() {
         frames = session.stats.summary()
-        focused = session.controller.focus != nil
-        endedCount = keepEnded ? session.controller.endedCount : 0
+        // Assigned only when they change, so the views that show them are not redrawn for nothing.
+        let isFocused = session.controller.focus != nil
+        if focused != isFocused { focused = isFocused }
+        let ended = keepEnded ? session.controller.endedCount : 0
+        if endedCount != ended { endedCount = ended }
     }
 
     private func receive(_ snapshot: EngineSnapshot) {
@@ -882,7 +890,14 @@ final class AppModel {
             let megabytes = UserDefaults.standard.object(forKey: "logMegabytes") as? Double ?? 2000
             Task.detached(priority: .utility) { _ = try? store.prune(maximumAge: days * 86_400, maximumBytes: Int(megabytes * 1_000_000)) }
         }
-        timeRange = window.range
+        // The slider's range moves on once a second; moving it at every snapshot redraws
+        // the timeline for a change no one can see.
+        if let range = window.range,
+           abs(range.upperBound - (timeRange?.upperBound ?? -1e9)) >= 1 || abs(range.lowerBound - (timeRange?.lowerBound ?? -1e9)) >= 1 {
+            timeRange = range
+        } else if window.range == nil, timeRange != nil {
+            timeRange = nil
+        }
         if panelTab == .log, logRows.isEmpty, !logBusy, snapshot.time > 3 { runLogQuery() }
         if let back = logMomentRequest, snapshot.time > back + 3 {
             // For screenshots: show a moment from the log once there is one to show.
@@ -906,7 +921,21 @@ final class AppModel {
         guard scrubTime == nil, logMoment == nil else { return }
         self.snapshot = snapshot
         displayedWallClock = snapshot.wallClock
-        derive()
+        // The graph takes every snapshot; the tables once a second. Redrawing a table is
+        // the most expensive thing the window does, and figures that change twice a second
+        // are harder to read, not easier.
+        if Date().timeIntervalSince(lastDerived) >= 0.95 { derive() }
+        if Date().timeIntervalSince(menuUpdated) >= 5 {
+            menuUpdated = Date()
+            menuLines = [statusLine] + talkers.prefix(3).map { "\($0.name)  \(ByteFormat.rate($0.rate))" }
+        }
+    }
+
+    /// The totals in the top bar, at most once a second, unless the mode has changed.
+    private func receiveSummary(_ next: LiveFeed.Summary) {
+        guard Date().timeIntervalSince(summaryUpdated) >= 0.95 || "\(next.mode)" != "\(summary.mode)" else { return }
+        summaryUpdated = Date()
+        summary = next
     }
 
     /// Everything the panels show, worked out from one snapshot.
@@ -1023,6 +1052,7 @@ final class AppModel {
 
     private func derive() {
         guard let snapshot else { return }
+        lastDerived = Date()
         derivation += 1
         let generation = derivation
         let filter = self.filter

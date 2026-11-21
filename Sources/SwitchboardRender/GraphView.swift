@@ -61,7 +61,7 @@ final class RenderLoop: NSObject, @unchecked Sendable {
     @MainActor
     func start(in view: NSView) {
         let link = view.displayLink(target: self, selector: #selector(tick(_:)))
-        link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 120, preferred: 120)
+        link.preferredFrameRateRange = read { $0.profile }.frameRates
         self.link = link
         nonisolated(unsafe) let unsafeLink = link
         let thread = Thread { [weak self] in
@@ -93,7 +93,10 @@ final class RenderLoop: NSObject, @unchecked Sendable {
         let view = read { $0 }
         guard view.drawableSize.width > 0, view.drawableSize.height > 0 else { return }
         if layer.drawableSize != view.drawableSize { layer.drawableSize = view.drawableSize }
-        if renderer.profile != view.profile { renderer.profile = view.profile }
+        if renderer.profile != view.profile {
+            renderer.profile = view.profile
+            link?.preferredFrameRateRange = view.profile.frameRates
+        }
 
         let time = Float(frameStart - epoch)
         controller.advance(time: time, motion: view.profile != .still)

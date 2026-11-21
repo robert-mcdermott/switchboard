@@ -52,7 +52,10 @@ public struct MMDBReader: Sendable {
         }
     }
 
-    private let bytes: [UInt8]
+    /// The file's bytes, mapped from disk rather than read: a city database is over 100 MB,
+    /// and only the pages lookups touch need ever be in memory.
+    private let storage: Storage
+    private var bytes: UnsafeRawBufferPointer { storage.bytes }
     private let nodeCount: Int
     private let recordSize: Int
     private let ipVersion: Int
@@ -63,14 +66,53 @@ public struct MMDBReader: Sendable {
 
     static let marker: [UInt8] = [0xAB, 0xCD, 0xEF] + Array("MaxMind.com".utf8)
 
+    /// Owns the bytes: a mapping of the file, or a copy of data given directly.
+    final class Storage: @unchecked Sendable {
+        let bytes: UnsafeRawBufferPointer
+        private let mapped: Bool
+
+        init(copying data: Data) {
+            let buffer = UnsafeMutableRawBufferPointer.allocate(byteCount: max(data.count, 1), alignment: 8)
+            data.copyBytes(to: buffer.bindMemory(to: UInt8.self))
+            bytes = UnsafeRawBufferPointer(rebasing: UnsafeRawBufferPointer(buffer)[0..<data.count])
+            mapped = false
+        }
+
+        init?(mapping url: URL) {
+            let descriptor = open(url.path, O_RDONLY)
+            guard descriptor >= 0 else { return nil }
+            defer { close(descriptor) }
+            var status = stat()
+            guard fstat(descriptor, &status) == 0, status.st_size > 0 else { return nil }
+            let size = Int(status.st_size)
+            guard let address = mmap(nil, size, PROT_READ, MAP_PRIVATE, descriptor, 0), address != MAP_FAILED else { return nil }
+            bytes = UnsafeRawBufferPointer(start: address, count: size)
+            mapped = true
+        }
+
+        deinit {
+            guard let base = bytes.baseAddress else { return }
+            if mapped {
+                munmap(UnsafeMutableRawPointer(mutating: base), bytes.count)
+            } else {
+                UnsafeMutableRawPointer(mutating: base).deallocate()
+            }
+        }
+    }
+
     public init(data: Data) throws {
-        bytes = [UInt8](data)
+        try self.init(storage: Storage(copying: data))
+    }
+
+    private init(storage: Storage) throws {
+        self.storage = storage
+        let bytes = storage.bytes
         // The metadata sits at the very end, after the last occurrence of the marker.
         let searchFrom = max(0, bytes.count - 131_072)
         var found: Int?
         var index = bytes.count - Self.marker.count
-        while index >= searchFrom {
-            if bytes[index] == Self.marker[0], Array(bytes[index..<(index + Self.marker.count)]) == Self.marker {
+        while index >= max(searchFrom, 0) {
+            if bytes[index] == Self.marker[0], bytes[index..<(index + Self.marker.count)].elementsEqual(Self.marker) {
                 found = index
                 break
             }
@@ -98,7 +140,8 @@ public struct MMDBReader: Sendable {
     }
 
     public init(url: URL) throws {
-        try self.init(data: try Data(contentsOf: url, options: .mappedIfSafe))
+        guard let storage = Storage(mapping: url) else { throw MMDBError.notADatabase("could not open \(url.lastPathComponent)") }
+        try self.init(storage: storage)
     }
 
     /// The record for an address, or `nil` if the database has nothing on it.
@@ -147,7 +190,7 @@ public struct MMDBReader: Sendable {
 
     /// Decodes the self-describing values of a data section.
     private struct Decoder {
-        let bytes: [UInt8]
+        let bytes: UnsafeRawBufferPointer
         /// Where the section starts; offsets and pointers are relative to this.
         let base: Int
         /// Values decoded so far for one lookup: a guard against a file built to make us loop.

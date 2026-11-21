@@ -34,6 +34,17 @@ public enum RenderProfile: String, CaseIterable, Sendable {
     /// No motion at all: rate shows as thickness and brightness alone.
     case still
 
+    /// How often to draw. Cinema uses all a ProMotion display offers; Operator, meant for
+    /// long sessions, draws half as often for half the cost, which pulses at these speeds
+    /// do not show; Still has almost nothing that moves.
+    public var frameRates: CAFrameRateRange {
+        switch self {
+        case .cinema: CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
+        case .operator: CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
+        case .still: CAFrameRateRange(minimum: 15, maximum: 30, preferred: 30)
+        }
+    }
+
     var bloom: Float {
         switch self {
         case .cinema: 0.8

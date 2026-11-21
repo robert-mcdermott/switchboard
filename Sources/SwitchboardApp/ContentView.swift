@@ -41,7 +41,8 @@ struct ContentView: View {
         }
         .task {
             while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(500))
+                // Once a second is as often as a person reads these figures.
+                try? await Task.sleep(for: .seconds(1))
                 model.refresh()
                 if model.kiosk { NSCursor.setHiddenUntilMouseMoves(true) }
             }
@@ -170,6 +171,21 @@ private struct HoverLayer: View {
     }
 }
 
+/// One line of text that changes often. The closure is read inside this view's body, so
+/// only this view depends on what it reads.
+private struct ReadoutText: View {
+    let text: () -> String
+    let size: CGFloat
+    let color: Color
+
+    var body: some View {
+        Text(text())
+            .font(.mono(size))
+            .foregroundStyle(color)
+            .lineLimit(1)
+    }
+}
+
 /// The recent past as a slider. Drag left to go back; the graph and every table follow.
 struct TimelineBar: View {
     @Bindable var model: AppModel
@@ -238,10 +254,9 @@ struct TopBar: View {
                 .foregroundStyle(Color.signal)
                 .fixedSize()
 
-            Text(model.modeLine)
-                .font(.mono(10))
-                .foregroundStyle(Color.dim)
-                .lineLimit(1)
+            // Figures that change every tick live in views of their own, so the rest of the
+            // bar, with its controls, is not rebuilt twice a second.
+            ReadoutText(text: { model.modeLine }, size: 10, color: Color.dim)
                 .layoutPriority(-1)
                 .help("Standalone mode sees your own processes. System daemons need the collector.")
 
@@ -318,17 +333,11 @@ struct TopBar: View {
             }
             .zIndex(1)
 
-            Text(model.filterError ?? model.matchLine)
-                .font(.mono(10))
-                .foregroundStyle(model.filterError == nil ? Color.dim : Color.attention)
-                .lineLimit(1)
+            ReadoutText(text: { model.filterError ?? model.matchLine }, size: 10, color: model.filterError == nil ? Color.dim : Color.attention)
 
             Spacer(minLength: 8)
 
-            Text(model.statusLine)
-                .font(.mono(11))
-                .foregroundStyle(Color.readout)
-                .lineLimit(1)
+            ReadoutText(text: { model.statusLine }, size: 11, color: Color.readout)
                 .layoutPriority(-1)
 
             Picker("Layout", selection: Binding(get: { model.layout }, set: { model.setLayout($0) })) {

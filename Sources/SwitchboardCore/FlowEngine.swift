@@ -66,6 +66,10 @@ public final class FlowEngine {
     public private(set) var flows: [FlowID: Flow] = [:]
     public private(set) var listeners: [FlowID: Listener] = [:]
     public private(set) var processes: [Int32: ProcessRecord] = [:]
+    /// Bumped whenever `processes` changes, so snapshots can share one sorted copy of it:
+    /// it rarely changes, and a second's history then costs nothing for processes.
+    private var processesVersion = 0
+    private var processesShared: (version: Int, list: [ProcessRecord]) = (-1, [])
     public private(set) var now: EngineTime = 0
     /// Seconds since 1970 at engine time zero.
     public var wallClockOrigin: Double = 0
@@ -370,6 +374,7 @@ public final class FlowEngine {
         }
         processes[observation.pid] = resolver.resolve(
             pid: observation.pid, name: observation.processName, uniqueID: observation.uniquePID)
+        processesVersion &+= 1
     }
 
     // MARK: - Enrichment
@@ -396,8 +401,10 @@ public final class FlowEngine {
 
     /// Records the result of checking a process's code signature.
     public func setSigning(pid: Int32, status: SigningStatus, teamID: String?) {
+        guard processes[pid] != nil else { return }
         processes[pid]?.signing = status
         processes[pid]?.teamID = teamID
+        processesVersion &+= 1
     }
 
     // MARK: - Names and services from packets
@@ -518,19 +525,26 @@ public final class FlowEngine {
         if !purged.isEmpty || delta.listenersChanged {
             var referenced = Set(flows.values.map(\.pid))
             referenced.formUnion(listeners.values.map(\.pid))
-            processes = processes.filter { referenced.contains($0.key) }
+            let kept = processes.filter { referenced.contains($0.key) }
+            if kept.count != processes.count {
+                processes = kept
+                processesVersion &+= 1
+            }
         }
     }
 
     // MARK: - Reading
 
     public func snapshot() -> EngineSnapshot {
-        EngineSnapshot(
+        if processesShared.version != processesVersion {
+            processesShared = (processesVersion, processes.values.sorted { $0.pid < $1.pid })
+        }
+        return EngineSnapshot(
             time: now,
             wallClock: wallClockOrigin + now,
             flows: flows.values.sorted { $0.id < $1.id },
             listeners: listeners.values.sorted { $0.id < $1.id },
-            processes: processes.values.sorted { $0.pid < $1.pid },
+            processes: processesShared.list,
             dns: dnsLog)
     }
 }

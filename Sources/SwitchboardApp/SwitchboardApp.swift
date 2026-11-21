@@ -41,25 +41,29 @@ struct SwitchboardApp: App {
             }
         }
 
+        // The menu's figures are refreshed every few seconds, and read in a view of their own:
+        // read here, every change of them rebuilt the whole scene and redrew the menu bar.
         MenuBarExtra("Switchboard", systemImage: "point.3.connected.trianglepath.dotted") {
-            Text("Switchboard \(Switchboard.version)")
-            Text(model.statusLine)
-            if !model.talkers.isEmpty {
-                Divider()
-                ForEach(model.talkers.prefix(3)) { talker in
-                    Text("\(talker.name)  \(ByteFormat.rate(talker.rate))")
-                }
-            }
-            Divider()
-            Button(model.paused ? "Resume" : "Pause") { model.togglePause() }
-            Divider()
-            Button("Quit Switchboard") { NSApplication.shared.terminate(nil) }
-                .keyboardShortcut("q")
+            StatusMenu(model: model)
         }
 
         Settings {
             SettingsView()
         }
+    }
+}
+
+struct StatusMenu: View {
+    let model: AppModel
+
+    var body: some View {
+        Text("Switchboard \(Switchboard.version)")
+        ForEach(model.menuLines, id: \.self) { line in Text(line) }
+        Divider()
+        Button(model.paused ? "Resume" : "Pause") { model.togglePause() }
+        Divider()
+        Button("Quit Switchboard") { NSApplication.shared.terminate(nil) }
+            .keyboardShortcut("q")
     }
 }
 
