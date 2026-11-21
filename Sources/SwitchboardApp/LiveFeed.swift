@@ -55,6 +55,8 @@ final class LiveFeed: @unchecked Sendable {
     private var collector: CollectorClient?
     private var failures: [String] = []
     private let trust = TrustCache()
+    /// The path each process's signature was last asked about.
+    private var signingAsked: [Int32: String] = [:]
     /// Exists only while the user has chosen active lookups: nothing else here sends packets.
     private var reverse: ReverseResolver?
 
@@ -136,82 +138,94 @@ final class LiveFeed: @unchecked Sendable {
         let origin = engine.wallClockOrigin
         var tick = 0
         while lock.withLock({ running }) {
-            let now = Double(DispatchTime.now().uptimeNanoseconds - started) / 1e9
+            // This thread runs for the life of the app, so nothing autoreleased in a tick
+            // would ever be freed without a pool of its own: a failed file check every
+            // tick left an NSError behind, about 20 a second.
+            autoreleasepool {
+                let now = Double(DispatchTime.now().uptimeNanoseconds - started) / 1e9
 
-            if followsCollector {
-                if let collector, !collector.isConnected {
-                    // The collector has gone: carry on with what the app can see by itself.
-                    if let local = try? SourceSpec.make(spec, flows: flows) { switchSources(to: local, origin: origin) }
-                } else if collector == nil, tick % 8 == 0, FileManager.default.fileExists(atPath: collectorPath),
-                          let full = try? SourceSpec.make("collector:\(collectorPath)")
-                {
-                    switchSources(to: full, origin: origin)
+                if followsCollector {
+                    if let collector, !collector.isConnected {
+                        // The collector has gone: carry on with what the app can see by itself.
+                        if let local = try? SourceSpec.make(spec, flows: flows) { switchSources(to: local, origin: origin) }
+                    } else if collector == nil, tick % 8 == 0, FileManager.default.fileExists(atPath: collectorPath),
+                              let full = try? SourceSpec.make("collector:\(collectorPath)")
+                    {
+                        switchSources(to: full, origin: origin)
+                    }
                 }
-            }
 
-            let (newEnricher, changed, lookups) = lock.withLock { () -> ((any AddressEnricher)?, Bool, Bool) in
-                defer { enricherChanged = false }
-                return (wantedEnricher, enricherChanged, activeLookups)
-            }
-            if changed {
-                engine.enricher = newEnricher
-                engine.refreshEnrichment()
-            }
-            if lookups, !simulated {
-                if reverse == nil { reverse = ReverseResolver() }
-            } else {
-                reverse = nil
-            }
-
-            let interval = lock.withLock { foreground } ? 0.5 : 1.0
-            for case let source as NStatSource in sources where source.counterInterval != interval {
-                source.counterInterval = interval
-            }
-
-            for source in sources {
-                engine.ingest(source.poll(now: now), from: source.name, at: now)
-                // Hostnames and observed services, where a source can supply them.
-                if let capture = source as? CaptureProvider { engine.observe(capture.pollCapture(now: now), at: now) }
-            }
-            // Signatures are checked in the background; results are picked up as they land.
-            if !simulated {
-                for process in engine.processes.values where process.signing == .unknown {
-                    guard let path = process.path, let verdict = trust.verdict(forPath: path) else { continue }
-                    engine.setSigning(pid: process.pid, status: verdict.status, teamID: verdict.teamID)
+                let (newEnricher, changed, lookups) = lock.withLock { () -> ((any AddressEnricher)?, Bool, Bool) in
+                    defer { enricherChanged = false }
+                    return (wantedEnricher, enricherChanged, activeLookups)
                 }
-            }
-            if let reverse {
-                for flow in engine.flows.values where flow.hostname == nil && flow.state != .closed {
-                    reverse.request(flow.key.remote.address)
+                if changed {
+                    engine.enricher = newEnricher
+                    engine.refreshEnrichment()
                 }
-                engine.observe(reverse.pollCapture(now: now), at: now)
-            }
-            let snapshot = engine.snapshot()
-            controller.update(snapshot, time: clock())
-            // The tables and charts need the model too, but only once a second.
-            if tick % 4 == 0 { onSnapshot(snapshot) }
-
-            if tick % 2 == 0 {
-                var summary = Summary()
-                for flow in engine.flows.values where flow.state != .closed {
-                    summary.flows += 1
-                    summary.rateIn += flow.rateIn
-                    summary.rateOut += flow.rateOut
-                }
-                summary.listeners = engine.listeners.count
-                summary.exposed = engine.listeners.values.count { $0.exposed }
-                summary.processes = engine.processes.count
-                // In Full mode the collector describes all of its sources, including packet capture.
-                let reported = collector?.health ?? []
-                summary.sources = (reported.isEmpty ? sources.map { "\($0.name): \($0.health.detail)" } : reported) + failures
-                // In Full mode a source the collector could not run is reported, not treated as a fault here.
-                summary.healthy = failures.isEmpty && (collector != nil || sources.allSatisfy { $0.health.running })
-                if let collector {
-                    summary.mode = .full(collectorUID: collector.collectorUID)
+                if lookups, !simulated {
+                    if reverse == nil { reverse = ReverseResolver() }
                 } else {
-                    summary.mode = simulated ? .simulated : .standalone
+                    reverse = nil
                 }
-                onSummary(summary)
+
+                let interval = lock.withLock { foreground } ? 0.5 : 1.0
+                for case let source as NStatSource in sources where source.counterInterval != interval {
+                    source.counterInterval = interval
+                }
+
+                for source in sources {
+                    engine.ingest(source.poll(now: now), from: source.name, at: now)
+                    // Hostnames and observed services, where a source can supply them.
+                    if let capture = source as? CaptureProvider { engine.observe(capture.pollCapture(now: now), at: now) }
+                }
+                // Signatures are checked in the background; results are picked up as they land.
+                if !simulated {
+                    for process in engine.processes.values where process.signing == .unknown {
+                        // A program whose signature could not be read stays unknown; it is
+                        // asked about once, not four times a second.
+                        guard let path = process.path, signingAsked[process.pid] != path else { continue }
+                        guard let verdict = trust.verdict(forPath: path) else { continue }
+                        signingAsked[process.pid] = path
+                        engine.setSigning(pid: process.pid, status: verdict.status, teamID: verdict.teamID)
+                    }
+                    if signingAsked.count > engine.processes.count * 2 + 100 {
+                        signingAsked = signingAsked.filter { engine.processes[$0.key] != nil }
+                    }
+                }
+                if let reverse {
+                    for flow in engine.flows.values where flow.hostname == nil && flow.state != .closed {
+                        reverse.request(flow.key.remote.address)
+                    }
+                    engine.observe(reverse.pollCapture(now: now), at: now)
+                }
+                let snapshot = engine.snapshot()
+                controller.update(snapshot, time: clock())
+                // The tables and charts need the model too, but only once a second.
+                if tick % 4 == 0 { onSnapshot(snapshot) }
+
+                if tick % 2 == 0 {
+                    var summary = Summary()
+                    for flow in engine.flows.values where flow.state != .closed {
+                        summary.flows += 1
+                        summary.rateIn += flow.rateIn
+                        summary.rateOut += flow.rateOut
+                    }
+                    summary.listeners = engine.listeners.count
+                    summary.exposed = engine.listeners.values.count { $0.exposed }
+                    summary.processes = engine.processes.count
+                    // In Full mode the collector describes all of its sources, including packet capture.
+                    let reported = collector?.health ?? []
+                    summary.sources = (reported.isEmpty ? sources.map { "\($0.name): \($0.health.detail)" } : reported) + failures
+                    // In Full mode a source the collector could not run is reported, not treated as a fault here.
+                    summary.healthy = failures.isEmpty && (collector != nil || sources.allSatisfy { $0.health.running })
+                    if let collector {
+                        summary.mode = .full(collectorUID: collector.collectorUID)
+                    } else {
+                        summary.mode = simulated ? .simulated : .standalone
+                    }
+                    onSummary(summary)
+                }
             }
             tick += 1
             Thread.sleep(forTimeInterval: 0.25)

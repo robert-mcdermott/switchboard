@@ -67,8 +67,11 @@ log("version \(Switchboard.version) serving \(socketPath) as uid \(geteuid())\(g
 let started = DispatchTime.now().uptimeNanoseconds
 var tick = 0
 while true {
-    let now = Double(DispatchTime.now().uptimeNanoseconds - started) / 1e9
-    server.tick(now: now, includeHealth: tick % 4 == 0)
+    // The loop never returns to a run loop, so it drains its own autoreleased objects.
+    autoreleasepool {
+        let now = Double(DispatchTime.now().uptimeNanoseconds - started) / 1e9
+        server.tick(now: now, includeHealth: tick % 4 == 0)
+    }
     tick += 1
     Thread.sleep(forTimeInterval: 0.25)
 }

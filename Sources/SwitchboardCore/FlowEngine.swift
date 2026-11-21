@@ -401,7 +401,7 @@ public final class FlowEngine {
 
     /// Records the result of checking a process's code signature.
     public func setSigning(pid: Int32, status: SigningStatus, teamID: String?) {
-        guard processes[pid] != nil else { return }
+        guard let known = processes[pid], known.signing != status || known.teamID != teamID else { return }
         processes[pid]?.signing = status
         processes[pid]?.teamID = teamID
         processesVersion &+= 1
