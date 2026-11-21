@@ -14,6 +14,8 @@ struct Workspace: Codable, Identifiable, Equatable, Sendable {
     var showPanel = true
     var showInspector = true
     var keepEnded = false
+    /// Whether connections within this Mac are shown. Absent in workspaces saved before it existed, meaning shown.
+    var showThisMac: Bool?
     var clustering = "automatic"
     /// Full screen with nothing but the graph.
     var kiosk = false
@@ -40,6 +42,7 @@ struct Configuration: Codable {
     static let keys = [
         "clustering", "clusterThreshold", "palette", "historyMinutes", "profile", "hostnames", "logging", "tagLists",
         "logDetail", "logDays", "logMegabytes", "layout", "lanesMinutes", "keepEnded", "homeLocation", "logSkipLoopback",
+        "showThisMac",
     ]
 
     static func current(workspaces: [Workspace], defaults: UserDefaults = .standard) -> Configuration {
@@ -54,7 +57,7 @@ struct Configuration: Codable {
     /// Writes the settings back, each as the type its reader expects.
     func apply(to defaults: UserDefaults = .standard) {
         let numbers: Set = ["clusterThreshold", "historyMinutes", "logDays", "logMegabytes", "lanesMinutes"]
-        let switches: Set = ["logging", "keepEnded", "logSkipLoopback"]
+        let switches: Set = ["logging", "keepEnded", "logSkipLoopback", "showThisMac"]
         for (key, value) in settings where Self.keys.contains(key) {
             if numbers.contains(key) {
                 if let number = Double(value) { defaults.set(key == "clusterThreshold" ? Int(number) as Any : number as Any, forKey: key) }
@@ -110,7 +113,7 @@ extension AppModel {
     func currentWorkspace(named name: String) -> Workspace {
         Workspace(
             name: name, layout: layout.rawValue, profile: profile.rawValue, filter: filter.text, panel: panelTab.rawValue,
-            showPanel: showPanel, showInspector: showInspector, keepEnded: keepEnded,
+            showPanel: showPanel, showInspector: showInspector, keepEnded: keepEnded, showThisMac: showThisMac,
             clustering: UserDefaults.standard.string(forKey: "clustering") ?? "automatic", kiosk: kiosk)
     }
 
@@ -123,6 +126,7 @@ extension AppModel {
         showPanel = workspace.showPanel
         showInspector = workspace.showInspector
         setKeepEnded(workspace.keepEnded)
+        setShowThisMac(workspace.showThisMac ?? true)
         UserDefaults.standard.set(workspace.clustering, forKey: "clustering")
         applySettings()
         setKiosk(workspace.kiosk)

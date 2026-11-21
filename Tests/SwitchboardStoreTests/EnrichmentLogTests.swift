@@ -173,4 +173,49 @@ private struct ByFirstByte: AddressEnricher {
             #expect(logged.entries.contains { $0.flow.key.remote.address.description == "8.8.8.8" })
         }
     }
+
+    /// Loopback both ways, this Mac calling its own network address, all of 127/8; and two
+    /// that do leave: the internet, and another machine on the same network.
+    private static func mixed(_ id: UInt64, local: String, remote: String) -> SourceEvent {
+        .seen(SocketObservation(
+            sourceID: id, proto: .tcp, local: Endpoint(address: IPAddress(local)!, port: UInt16(40_000 + id)),
+            remote: Endpoint(address: IPAddress(remote)!, port: 5432), pid: 9, processName: "app", tcpState: .established))
+    }
+
+    private static let mixedEvents = [
+        mixed(1, local: "127.0.0.1", remote: "127.0.0.1"), mixed(2, local: "::1", remote: "::1"),
+        mixed(3, local: "192.168.1.5", remote: "192.168.1.5"), mixed(4, local: "127.0.0.1", remote: "127.0.0.53"),
+        mixed(5, local: "192.168.1.5", remote: "8.8.8.8"), mixed(6, local: "192.168.1.5", remote: "192.168.1.9"),
+    ]
+
+    @Test func searchAndExportCanLeaveOutWhatStaysOnThisMac() throws {
+        let fixture = try Fixture()
+        fixture.engine.ingest(Self.mixedEvents, from: "t", at: 1)
+        fixture.store.record(fixture.engine.snapshot())
+        fixture.store.flush()
+        let range = fixture.all
+        #expect(try fixture.store.query(.all, from: range.from, to: range.to, limit: 100).matched == 6)
+        // SQL answers the whole of an empty filter; a filter on signing is checked row by row. Both agree.
+        for filter in [FlowFilter.all, try FlowFilter("signing=unknown")] {
+            let leaving = try fixture.store.query(filter, from: range.from, to: range.to, limit: 100, leavingThisMacOnly: true)
+            #expect(leaving.matched == 2, "\(filter.text)")
+            #expect(Set(leaving.entries.map(\.flow.key.remote.address.description)) == ["8.8.8.8", "192.168.1.9"])
+            #expect(leaving.histogram.reduce(0, +) == 2)
+        }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("sb-export-\(UUID().uuidString).csv")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let written = try fixture.store.export(
+            .all, from: range.from, to: range.to, format: .csv, redactHostnames: false, to: url, leavingThisMacOnly: true)
+        #expect(written == 2)
+    }
+
+    @Test func theLogSettingUsesTheSameTest() throws {
+        let fixture = try Fixture()
+        fixture.store.excludesLoopback = true
+        fixture.engine.ingest(Self.mixedEvents, from: "t", at: 1)
+        fixture.store.record(fixture.engine.snapshot())
+        fixture.store.flush()
+        let logged = try fixture.store.query(.all, from: fixture.all.from, to: fixture.all.to, limit: 100)
+        #expect(Set(logged.entries.map(\.flow.key.remote.address.description)) == ["8.8.8.8", "192.168.1.9"])
+    }
 }

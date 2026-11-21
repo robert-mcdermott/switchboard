@@ -74,7 +74,7 @@ The globe also needs to know where this Mac is. It guesses from the time zone; t
 
 | Part | What it is |
 |---|---|
-| Top bar | The filter, the layout, the profile, and buttons for keeping ended connections and showing the panels and inspector |
+| Top bar | The filter, the layout, the profile, and buttons for traffic within this Mac, keeping ended connections, and showing the panels and inspector |
 | Graph | The connections, in one of five layouts |
 | Timeline | Drag left to go back through the last 15 minutes (Settings ▸ History, up to an hour); the graph and tables follow. **Space** holds the present moment |
 | Panels | Tables: connections, top talkers, throughput, protocols, interfaces, DNS, ages, first seen, trust, listening sockets, the log, health |
@@ -125,9 +125,18 @@ remote:10.0.0.0/8 OR tag:office
 
 Note that a destination with no known country matches `country!=US`. Write `class:public country!=US` to leave out private addresses.
 
+### Traffic within this Mac
+
+Many connections never leave the machine: containers, development servers, databases, and editors talking to each other over loopback or this Mac's own address. On a developer's Mac they can be most of what there is. The laptop button in the top bar, or **L**, switches them:
+
+- **On** (the default): everything, including traffic within this Mac.
+- **Off**: only traffic to and from other machines. The graph, the tables, and the log search all leave the rest out, and a line at the top left says so.
+
+This only changes what is shown. Whether these connections are written to the log at all is a separate setting, below.
+
 ## The log
 
-Every connection is written to a SQLite file at `~/Library/Application Support/Switchboard/log.sqlite`. The Log panel searches it with the same filter; drag its slider to show a past moment in the graph. Settings ▸ Log sets how much detail is kept and for how long, and can leave out connections from this Mac to itself, which development tools and containers can open hundreds of a minute; the Log panel can erase it. From the command line:
+Every connection is written to a SQLite file at `~/Library/Application Support/Switchboard/log.sqlite`. The Log panel searches it with the same filter; drag its slider to show a past moment in the graph. Settings ▸ Log sets how much detail is kept and for how long; the Log panel can erase it. *Leave out connections within this Mac* stops them being written to the log at all, which keeps it much smaller on a developer's Mac (development tools and containers can open hundreds a minute). They still show live. It is off by default; to hide them from view instead, use the laptop button (**L**). From the command line:
 
 ```bash
 sbctl log query "process:Safari bytes>1MB" --since 7d
@@ -160,6 +169,7 @@ Choose *Save Current as Workspace…* to add your own. *Export Settings…* and 
 | E | Keep ended connections on screen |
 | B, I | Show or hide the panels, the inspector |
 | K | Kiosk mode |
+| L | Show or hide traffic within this Mac |
 | 0 | Reset zoom and pan, and turn the globe back home |
 | Esc | Leave focus or kiosk mode |
 

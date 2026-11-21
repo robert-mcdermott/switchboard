@@ -132,6 +132,10 @@ private struct GraphStatus: View {
                 Text("KEEPING ENDED CONNECTIONS — \(model.endedCount) shown dimmed · press E to turn off")
                     .foregroundStyle(Color.dim)
             }
+            if !model.showThisMac {
+                Text("ONLY TRAFFIC LEAVING THIS MAC — press L to show everything")
+                    .foregroundStyle(Color.dim)
+            }
         }
         .font(.mono(11))
         .padding(12)
@@ -360,6 +364,12 @@ struct TopBar: View {
             .labelsHidden()
             .frame(width: 210)
             .help("How much motion and glow to use. The data shown is the same.")
+
+            Toggle(isOn: Binding(get: { model.showThisMac }, set: { model.setShowThisMac($0) })) {
+                Image(systemName: "laptopcomputer").accessibilityLabel("Traffic within this Mac")
+            }
+            .toggleStyle(.button)
+            .help("Show connections that never leave this Mac, such as containers and development servers talking to each other. Off shows only traffic to other machines (L)")
 
             Toggle(isOn: Binding(get: { model.keepEnded }, set: { model.setKeepEnded($0) })) {
                 Image(systemName: "clock.arrow.circlepath").accessibilityLabel("Keep ended connections")

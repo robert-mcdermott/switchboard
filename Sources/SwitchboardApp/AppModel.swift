@@ -223,6 +223,8 @@ final class AppModel {
     var focused = false
     /// Ended connections stay on the graph, subdued, instead of fading away.
     private(set) var keepEnded = UserDefaults.standard.bool(forKey: "keepEnded")
+    /// Connections that never leave this Mac are shown unless this is turned off.
+    private(set) var showThisMac = UserDefaults.standard.object(forKey: "showThisMac") as? Bool ?? true
     private(set) var endedCount = 0
     /// How the connections are arranged.
     var layout = GraphLayout.constellation
@@ -358,6 +360,7 @@ final class AppModel {
             case .escape:
                 if kiosk { setKiosk(false) } else { focused = false }
             case .toggleKeepEnded: setKeepEnded(!keepEnded)
+            case .toggleThisMac: setShowThisMac(!showThisMac)
             case .layout(let number):
                 if GraphLayout.allCases.indices.contains(number - 1) { setLayout(GraphLayout.allCases[number - 1]) }
             case .toggleKiosk: setKiosk(!kiosk)
@@ -372,6 +375,8 @@ final class AppModel {
         startupKiosk = arguments.contains("--kiosk")
         startupDisplay = value("--display").flatMap(Int.init)
         controller.keepsEnded = keepEnded
+        if arguments.contains("--hide-this-mac") { showThisMac = false }
+        controller.showsThisMac = showThisMac
 
         do {
             let epoch = CACurrentMediaTime()
@@ -434,6 +439,15 @@ final class AppModel {
     }
 
     // MARK: - Actions
+
+    /// Shows or hides connections that never leave this Mac, in the graph, the tables, and the log search.
+    func setShowThisMac(_ on: Bool) {
+        showThisMac = on
+        session.controller.showsThisMac = on
+        UserDefaults.standard.set(on, forKey: "showThisMac")
+        derive()
+        if panelTab == .log { runLogQuery() }
+    }
 
     func setKeepEnded(_ on: Bool) {
         keepEnded = on
@@ -725,14 +739,14 @@ final class AppModel {
         guard let store else { return }
         logQuery += 1
         let generation = logQuery
-        let filter = self.filter
+        let filter = self.filter, leavingOnly = !showThisMac
         let range = logRange
         logBusy = true
         Task.detached(priority: .userInitiated) { [weak self] in
             let now = Date().timeIntervalSince1970
             let stats = (try? store.stats()) ?? LogStats()
             let from = range.seconds.map { now - $0 } ?? (stats.oldest ?? now - 3600)
-            let result = try? store.query(filter, from: from, to: now, limit: 1000)
+            let result = try? store.query(filter, from: from, to: now, limit: 1000, leavingThisMacOnly: leavingOnly)
             await self?.showLog(result, stats: stats, generation: generation)
         }
     }
@@ -785,11 +799,12 @@ final class AppModel {
         let panel = NSSavePanel()
         panel.nameFieldStringValue = "switchboard-log.\(format.rawValue)"
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        let filter = self.filter, redact = redactExports, range = logRange
+        let filter = self.filter, redact = redactExports, range = logRange, leavingOnly = !showThisMac
         Task.detached(priority: .userInitiated) { [weak self] in
             let now = Date().timeIntervalSince1970
             let from = range.seconds.map { now - $0 } ?? 0
-            let written = try? store.export(filter, from: from, to: now, format: format, redactHostnames: redact, to: url)
+            let written = try? store.export(
+                filter, from: from, to: now, format: format, redactHostnames: redact, to: url, leavingThisMacOnly: leavingOnly)
             await self?.exportFinished(written, url: url)
         }
     }
@@ -972,13 +987,16 @@ final class AppModel {
 
         /// Runs off the main thread: on a busy machine this is tens of milliseconds, and
         /// on the main thread that is a dropped frame every second.
-        static func make(_ snapshot: EngineSnapshot, filter: FlowFilter, rowLimit: Int, wantRows: Bool) -> Derived {
+        static func make(
+            _ snapshot: EngineSnapshot, filter: FlowFilter, showThisMac: Bool = true, rowLimit: Int, wantRows: Bool
+        ) -> Derived {
             var derived = Derived()
             let processes = Dictionary(uniqueKeysWithValues: snapshot.processes.map { ($0.pid, $0) })
             let open = snapshot.flows.filter { $0.state != .closed }
             derived.totalFlows = open.count
+            let shown = showThisMac ? open : open.filter { !$0.staysOnThisMac }
             let matching = filter.isEmpty
-                ? open : open.filter { filter.matches($0, process: processes[$0.pid], now: snapshot.time) }
+                ? shown : shown.filter { filter.matches($0, process: processes[$0.pid], now: snapshot.time) }
             derived.totalMatching = matching.count
 
             if wantRows {
@@ -1070,11 +1088,11 @@ final class AppModel {
         lastDerived = Date()
         derivation += 1
         let generation = derivation
-        let filter = self.filter
+        let filter = self.filter, showThisMac = self.showThisMac
         // Rows are only built when the table that shows them is on screen.
         let wantRows = showPanel && panelTab == .connections
         Task.detached(priority: .userInitiated) { [weak self] in
-            let derived = Derived.make(snapshot, filter: filter, rowLimit: Self.rowLimit, wantRows: wantRows)
+            let derived = Derived.make(snapshot, filter: filter, showThisMac: showThisMac, rowLimit: Self.rowLimit, wantRows: wantRows)
             await self?.apply(derived, generation: generation, wantRows: wantRows)
         }
     }
@@ -1168,7 +1186,9 @@ final class AppModel {
     }
 
     var matchLine: String {
-        filter.isEmpty ? "\(totalFlows) connections" : "\(totalMatching) of \(totalFlows) match"
+        if filter.isEmpty && showThisMac { return "\(totalFlows) connections" }
+        if filter.isEmpty { return "\(totalMatching) of \(totalFlows) leave this Mac" }
+        return "\(totalMatching) of \(totalFlows) match"
     }
 
     /// Facts about a run, gathered from inside the app, for measurement and screenshots.
@@ -1226,6 +1246,7 @@ final class AppModel {
             "mode": modeLine,
             "sourceLines": summary.sources,
             "keepEnded": keepEnded,
+            "showThisMac": showThisMac,
             "endedKept": session.controller.endedCount,
             "scanSockets": scan?.sockets ?? -1,
             "scanProcesses": scan?.processes.count ?? -1,

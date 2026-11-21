@@ -308,6 +308,7 @@ public final class GraphController: @unchecked Sendable {
     private var expanded = Set<NodeID>()
     private var scheme = PaletteScheme.standard
     private var keepEnded = false
+    private var showThisMac = true
     private var lanesSeconds = 600.0
     private var showNames = true
     private var tagColors: [String: SIMD3<Float>] = [:]
@@ -362,6 +363,13 @@ public final class GraphController: @unchecked Sendable {
     public var filter: FlowFilter {
         get { lock.withLock { activeFilter } }
         set { change { activeFilter = newValue } }
+    }
+
+    /// Whether connections that never leave this Mac are drawn. Off, only traffic to
+    /// other machines is. Takes effect at once, like the filter.
+    public var showsThisMac: Bool {
+        get { lock.withLock { showThisMac } }
+        set { change { showThisMac = newValue } }
     }
 
     public var clustering: Clustering {
@@ -515,6 +523,7 @@ public final class GraphController: @unchecked Sendable {
         // Take what is needed from shared state, then let go of the lock for the heavy part.
         lock.lock()
         let filter = activeFilter
+        let showThisMac = self.showThisMac
         let clusteringMode = self.clusteringMode
         let expanded = self.expanded
         let scheme = self.scheme
@@ -573,6 +582,7 @@ public final class GraphController: @unchecked Sendable {
         }
 
         for flow in shown {
+            if !showThisMac, flow.staysOnThisMac { continue }
             if !filter.isEmpty, !filter.matches(flow, process: processes[flow.pid], now: snapshot.time) { continue }
             var life = 1.0
             if flow.state == .closed {

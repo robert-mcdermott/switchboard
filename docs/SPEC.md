@@ -445,13 +445,15 @@ Values understand units (`KB/s`, `MB`, `h`, `m`), globs, and CIDR. A bare word m
 
 As built in M3: a filter that does not parse is reported and the last good filter stays in force, and a flow with no measurement for a field satisfies no comparison on it. Completion and saved filters are not built yet.
 
+**Traffic within this Mac** is a switch beside the filter, not part of it (**L**). A connection stays on this Mac when its remote address is loopback or equals its local address. Off, such connections are left out of the graph, the tables, the log search, and log exports (in SQL: `NOT (r_ip LIKE '127.%' OR r_ip = '::1' OR r_ip = l_ip)`). It is on by default, saved with workspaces, and independent of the log setting that stops these connections being written at all, which uses the same test.
+
 ### 10.5 Time
 
 The app keeps a rolling window of the recent past: one snapshot of the model per second, 15 minutes by default and up to 60, bounded also by the number of flow records held so a very busy machine keeps less. The scrubber shows any moment in that window in the graph and in every table; pausing is holding the present moment. Beyond the window, the Log Explorer reconstructs a range from SQLite and hands it to the same replay path.
 
 ### 10.6 Workspaces and display
 
-Named workspaces save layout, panels, filters, and profile; three ship by default (**NOC Wall**, **Privacy Audit**, **Developer**). Kiosk mode goes full screen on one display, shows only the graph, hides the pointer, and keeps the display awake; `--workspace NAME`, `--kiosk`, and `--display N` start it that way. As built, a workspace holds layout, profile, filter, panel, panel and inspector visibility, keep-ended, clustering, and kiosk, and settings with workspaces export to and import from JSON. The menu bar extra shows a live rate sparkline and the top three talkers.
+Named workspaces save layout, panels, filters, and profile; three ship by default (**NOC Wall**, **Privacy Audit**, **Developer**). Kiosk mode goes full screen on one display, shows only the graph, hides the pointer, and keeps the display awake; `--workspace NAME`, `--kiosk`, and `--display N` start it that way. As built, a workspace holds layout, profile, filter, panel, panel and inspector visibility, keep-ended, traffic within this Mac, clustering, and kiosk, and settings with workspaces export to and import from JSON. The menu bar extra shows a live rate sparkline and the top three talkers.
 
 ---
 

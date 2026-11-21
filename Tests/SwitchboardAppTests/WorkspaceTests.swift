@@ -35,6 +35,15 @@ private func scratchDefaults() -> UserDefaults {
         #expect(WorkspaceStore.saved(in: defaults).isEmpty)
         #expect(WorkspaceStore.all(in: defaults).count == 3)
     }
+
+    @Test func aWorkspaceSavedBeforeTheThisMacSwitchStillLoads() throws {
+        let old = """
+            {"name":"Mine","layout":"flow","profile":"operator","filter":"","panel":"connections","showPanel":true,
+             "showInspector":true,"keepEnded":false,"clustering":"automatic","kiosk":false}
+            """
+        let workspace = try JSONDecoder().decode(Workspace.self, from: Data(old.utf8))
+        #expect(workspace.name == "Mine" && workspace.showThisMac == nil)
+    }
 }
 
 @Suite struct ConfigurationTests {

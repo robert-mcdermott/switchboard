@@ -259,7 +259,7 @@ public final class LogStore: @unchecked Sendable {
         }
 
         for flow in snapshot.flows {
-            if skipLoopback, flow.key.remote.address.isLoopback { continue }
+            if skipLoopback, flow.staysOnThisMac { continue }
             let tuple = Tuple(pid: flow.pid, key: flow.key)
             if flow.state == .closed {
                 let closedAt = wall(flow.closedAt ?? snapshot.time)
@@ -415,12 +415,17 @@ public final class LogStore: @unchecked Sendable {
         return (conditions, values)
     }
 
+    /// SQL for `Flow.staysOnThisMac` turned round: the far end is neither loopback nor this
+    /// Mac's own address. Addresses are stored as text, and all of 127/8 is loopback.
+    static let leavesThisMac = "NOT (r_ip LIKE '127.%' OR r_ip = '::1' OR r_ip = l_ip)"
+
     /// Every connection alive at some point in the range that matches `filter`, visited
     /// newest first. SQL narrows the candidates; the filter itself decides.
     private func scan(
-        _ filter: FlowFilter, from: Double, to: Double, now: Double, _ body: (LogEntry) -> Void
+        _ filter: FlowFilter, from: Double, to: Double, now: Double, leavingThisMacOnly: Bool = false, _ body: (LogEntry) -> Void
     ) throws -> Int {
         var (conditions, values) = try rangeConditions(from: from, to: to)
+        if leavingThisMacOnly { conditions.append(Self.leavesThisMac) }
         if let prefilter = filter.sqlPrefilter() {
             conditions.append(prefilter.clause)
             values += prefilter.bindings.map(Database.Value.init)
@@ -435,8 +440,11 @@ public final class LogStore: @unchecked Sendable {
         return scanned
     }
 
+    /// What the log holds in a range that matches `filter`. With `leavingThisMacOnly`,
+    /// connections that never left this Mac are left out, as the graph does when told to.
     public func query(
-        _ filter: FlowFilter, from: Double, to: Double, limit: Int = 1000, buckets: Int = 60, now: Double = Date().timeIntervalSince1970
+        _ filter: FlowFilter, from: Double, to: Double, limit: Int = 1000, buckets: Int = 60, now: Double = Date().timeIntervalSince1970,
+        leavingThisMacOnly: Bool = false
     ) throws -> LogQueryResult {
         try queue.sync {
             let started = DispatchTime.now().uptimeNanoseconds
@@ -453,6 +461,7 @@ public final class LogStore: @unchecked Sendable {
                try database.scalar("SELECT COUNT(*) FROM flow WHERE ascii = 0 AND last_seen >= ? AND first_seen <= ?", [.real(from), .real(to)]) == 0
             {
                 var (conditions, values) = try rangeConditions(from: from, to: to)
+                if leavingThisMacOnly { conditions.append(Self.leavesThisMac) }
                 if let prefilter {
                     conditions.append(prefilter.clause)
                     values += prefilter.bindings.map(Database.Value.init)
@@ -479,7 +488,7 @@ public final class LogStore: @unchecked Sendable {
                 return result
             }
 
-            result.scanned = try scan(filter, from: from, to: to, now: now) { entry in
+            result.scanned = try scan(filter, from: from, to: to, now: now, leavingThisMacOnly: leavingThisMacOnly) { entry in
                 result.matched += 1
                 if result.entries.count < limit { result.entries.append(entry) }
                 let bucket = Int((max(entry.flow.firstSeen, from) - from) / width)
@@ -570,7 +579,7 @@ public final class LogStore: @unchecked Sendable {
     @discardableResult
     public func export(
         _ filter: FlowFilter, from: Double, to: Double, format: ExportFormat, redactHostnames: Bool, to destination: URL,
-        now: Double = Date().timeIntervalSince1970
+        now: Double = Date().timeIntervalSince1970, leavingThisMacOnly: Bool = false
     ) throws -> Int {
         try queue.sync {
             FileManager.default.createFile(atPath: destination.path, contents: nil)
@@ -583,7 +592,7 @@ public final class LogStore: @unchecked Sendable {
             var written = 0
             var failure: Error?
             var pending = Data()
-            _ = try scan(filter, from: from, to: to, now: now) { entry in
+            _ = try scan(filter, from: from, to: to, now: now, leavingThisMacOnly: leavingThisMacOnly) { entry in
                 let flow = entry.flow
                 let values: [String] = [
                     stamp.string(from: Date(timeIntervalSince1970: flow.firstSeen)),

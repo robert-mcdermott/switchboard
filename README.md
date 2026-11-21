@@ -92,7 +92,7 @@ The **Workspace** menu holds named arrangements of layout, filter, and panels. T
 build/Switchboard.app/Contents/MacOS/Switchboard --workspace "NOC Wall" --display 2
 ```
 
-Other keys: **Space** pauses, **/** jumps to the filter, **P** changes how lively the picture is, **E** keeps ended connections on screen, **B** and **I** show and hide the panels and the inspector, **0** resets the view.
+Other keys: **Space** pauses, **/** jumps to the filter, **P** changes how lively the picture is, **E** keeps ended connections on screen, **L** shows or hides traffic that never leaves this Mac, **B** and **I** show and hide the panels and the inspector, **0** resets the view.
 
 ## Location data
 
@@ -122,6 +122,8 @@ remote:10.0.0.0/8 OR tag:office
 ```
 
 Terms are `field:value` (contains), `=`, `!=`, and `<` `>` for numbers; combine them with `AND`, `OR`, `NOT`, and brackets. Values understand units (`KB/s`, `MB`, `h`), `*` wildcards, and networks in CIDR form. A bare word matches process, hostname, service, and address. The **?** beside the filter field lists every field.
+
+Separately, the laptop button (**L**) shows or hides connections that never leave this Mac: loopback, and programs reaching this Mac by its own address. On a developer's Mac, containers and local servers can be most of the traffic. On shows everything; off shows only traffic to other machines, in the graph, the tables, and the log search alike.
 
 ## The command line tool
 

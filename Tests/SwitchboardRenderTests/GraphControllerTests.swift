@@ -657,3 +657,53 @@ private struct TwoOwners: AddressEnricher {
         #expect(signedBy(2)?.hasPrefix("INVALID") == true)
     }
 }
+
+@Suite struct ThisMacTests {
+    @Test func knowsWhatNeverLeavesThisMac() throws {
+        let pairs: [(local: String, remote: String, stays: Bool)] = [
+            ("127.0.0.1", "127.0.0.1", true), ("127.0.0.1", "127.0.0.53", true), ("::1", "::1", true),
+            ("192.168.1.5", "192.168.1.5", true), ("192.168.1.5", "192.168.1.9", false), ("192.168.1.5", "8.8.8.8", false),
+        ]
+        let engine = FlowEngine()
+        engine.ingest(pairs.enumerated().map { offset, pair in
+            .seen(SocketObservation(
+                sourceID: UInt64(offset + 1), proto: .tcp, local: Endpoint(address: IPAddress(pair.local)!, port: UInt16(50_000 + offset)),
+                remote: Endpoint(address: IPAddress(pair.remote)!, port: 80), pid: 1, processName: "app", tcpState: .established))
+        }, from: "t", at: 0)
+        let flows = engine.snapshot().flows
+        #expect(flows.count == pairs.count)
+        for pair in pairs {
+            let flow = try #require(flows.first {
+                $0.key.local.address.description == pair.local && $0.key.remote.address.description == pair.remote
+            })
+            #expect(flow.staysOnThisMac == pair.stays, "\(pair.local) → \(pair.remote)")
+        }
+    }
+
+    @Test func hidesWhatNeverLeavesThisMacAndShowsItAgain() {
+        let engine = FlowEngine()
+        func seen(_ id: UInt64, pid: Int32, local: String, remote: String) -> SourceEvent {
+            .seen(SocketObservation(
+                sourceID: id, proto: .tcp, local: Endpoint(address: IPAddress(local)!, port: UInt16(40_000 + id)),
+                remote: Endpoint(address: IPAddress(remote)!, port: 8080), pid: pid, processName: "app\(pid)",
+                rxBytes: 5000, txBytes: 500, tcpState: .established))
+        }
+        engine.ingest([
+            seen(1, pid: 1, local: "127.0.0.1", remote: "127.0.0.1"), seen(2, pid: 1, local: "10.0.0.2", remote: "10.0.0.2"),
+            seen(3, pid: 2, local: "10.0.0.2", remote: "8.8.8.8"),
+        ], from: "t", at: 0)
+        let controller = GraphController()
+        controller.clustering = .off
+        controller.update(engine.snapshot(), time: 0)
+        controller.settle()
+        #expect(controller.flows(for: .node(.process(1))).count == 2)
+        #expect(controller.flows(for: .node(.process(2))).count == 1)
+        controller.showsThisMac = false
+        controller.settle()
+        #expect(controller.flows(for: .node(.process(1))).isEmpty)
+        #expect(controller.flows(for: .node(.process(2))).count == 1)
+        controller.showsThisMac = true
+        controller.settle()
+        #expect(controller.flows(for: .node(.process(1))).count == 2)
+    }
+}

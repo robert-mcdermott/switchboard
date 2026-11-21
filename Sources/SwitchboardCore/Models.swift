@@ -219,3 +219,12 @@ public struct ProcessRecord: Sendable, Codable, Identifiable, Hashable {
         self.restricted = restricted
     }
 }
+
+extension Flow {
+    /// Never leaves this Mac: the far end is a loopback address, or this Mac's own address
+    /// (a program connecting to a server on the same machine by its network address).
+    /// Development tools and containers open hundreds of these a minute.
+    public var staysOnThisMac: Bool {
+        key.remote.address.isLoopback || key.remote.address == key.local.address
+    }
+}

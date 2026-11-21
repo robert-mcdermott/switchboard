@@ -158,6 +158,8 @@ public final class GraphSession: NSObject {
         /// 1 for the first layout, 2 for the second, and so on.
         case layout(Int)
         case toggleKiosk
+        /// Show or hide connections that never leave this Mac.
+        case toggleThisMac
     }
 
     public enum ContextAction: Sendable {
@@ -571,6 +573,7 @@ final class GraphLayerView: NSView {
         case "4": session?.key(.layout(4))
         case "5": session?.key(.layout(5))
         case "k", "K": session?.key(.toggleKiosk)
+        case "l", "L": session?.key(.toggleThisMac)
         case "\u{1B}": session?.key(.escape)
         default: super.keyDown(with: event)
         }
