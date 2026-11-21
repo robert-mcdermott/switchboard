@@ -1338,7 +1338,7 @@ public final class GraphController: @unchecked Sendable {
             return HoverInfo(
                 title: groupLabels[id] ?? key,
                 subtitle: "\(addresses.count) addresses · grouped by \(Self.groupName(kind))",
-                rows: rows, footnote: layoutMode == .constellation ? "Right-click to expand into separate addresses" : nil)
+                rows: rows, footnote: layoutMode == .constellation || layoutMode == .globe ? "Right-click to expand into separate addresses" : nil)
 
         case .node(.service(let service)):
             let users = Set(aggregate.flows.map(\.pid)).sorted().map(name)

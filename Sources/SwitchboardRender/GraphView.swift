@@ -473,8 +473,9 @@ final class GraphLayerView: NSView {
         let menu = NSMenu()
         var entries: [(String, Int)] = [("Filter to This", 0), ("Focus on This", 1), ("Copy Details", 2)]
         if case .node(.process) = target { entries.append(("Reveal in Finder", 3)) }
-        // Grouping is the constellation's; the other layouts arrange destinations their own way.
-        if session.controller.layout == .constellation {
+        // Grouping belongs to the constellation, and the globe places the same groups; the
+        // other layouts arrange destinations their own way.
+        if [.constellation, .globe].contains(session.controller.layout) {
             if case .node(.network) = target { entries.append(("Expand into Addresses", 4)) }
             if case .node(.group(.asn, _)) = target { entries.append(("Expand into Addresses", 4)) }
             if case .node(.group(.country, _)) = target { entries.append(("Expand into Addresses", 4)) }
