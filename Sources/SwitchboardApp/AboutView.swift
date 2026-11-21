@@ -41,7 +41,7 @@ struct AboutView: View {
                 ])
                 section("Data from others", [
                     "IP Geolocation by DB-IP (db-ip.com), licensed CC BY 4.0, when you have fetched it.",
-                    "The world outline on the globe was drawn for Switchboard.",
+                    "The globe's coastlines: Natural Earth (naturalearthdata.com), 1:110m, public domain, built in.",
                 ])
             }
             .padding(24)

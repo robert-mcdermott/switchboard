@@ -313,6 +313,21 @@ public final class GraphSession: NSObject {
             $0.userZoom = 1
             $0.pan = .zero
         }
+        controller.resetGlobe()
+    }
+
+    /// In the globe, dragging turns the world rather than moving the view.
+    var dragTurnsGlobe: Bool { controller.layout == .globe }
+
+    /// World units per point of pointer travel.
+    private var worldPerPoint: Float { loop?.read { $0.backing / $0.camera.scale } ?? 1 }
+
+    func turnGlobe(byPoints delta: CGSize) {
+        controller.turnGlobe(by: SIMD2(Float(delta.width), Float(delta.height)) * worldPerPoint)
+    }
+
+    func releaseGlobe(pointsPerSecond velocity: CGSize) {
+        controller.releaseGlobe(velocity: SIMD2(Float(velocity.width), Float(velocity.height)) * worldPerPoint)
     }
 
     func hover(at point: CGPoint?) {
@@ -446,23 +461,48 @@ final class GraphLayerView: NSView {
     private var dragged = false
     private var contextTarget: PickTarget?
 
+    /// The pointer's recent speed while turning the globe, in points a second, and when it last moved.
+    private var dragVelocity = CGSize.zero
+    private var lastDragTime: TimeInterval = 0
+
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
         pressedAt = location(event)
         dragged = false
+        dragVelocity = .zero
+        lastDragTime = event.timestamp
     }
 
     override func mouseDragged(with event: NSEvent) {
         // A press that wanders a few points is still a click.
         if let pressedAt, hypot(location(event).x - pressedAt.x, location(event).y - pressedAt.y) > 3 { dragged = true }
         guard dragged else { return }
-        session?.pan(byPoints: CGSize(width: event.deltaX, height: -event.deltaY))
+        let delta = CGSize(width: event.deltaX, height: -event.deltaY)
+        // On the globe a drag turns the world; with ⌥ it moves the view, as elsewhere.
+        if session?.dragTurnsGlobe == true, !event.modifierFlags.contains(.option) {
+            session?.turnGlobe(byPoints: delta)
+            let elapsed = event.timestamp - lastDragTime
+            if elapsed > 0.001 {
+                // Smoothed, so one uneven event does not decide the spin.
+                let blend = min(1, elapsed / 0.05)
+                dragVelocity = CGSize(
+                    width: dragVelocity.width * (1 - blend) + delta.width / elapsed * blend,
+                    height: dragVelocity.height * (1 - blend) + delta.height / elapsed * blend)
+            }
+        } else {
+            session?.pan(byPoints: delta)
+        }
+        lastDragTime = event.timestamp
         session?.hover(at: nil)
     }
 
     override func mouseUp(with event: NSEvent) {
         if !dragged {
             session?.click(at: location(event), count: event.clickCount, extend: event.modifierFlags.contains(.command))
+        } else if session?.dragTurnsGlobe == true {
+            // Held still before letting go: it stays put. Let go mid-swipe: it spins on and slows.
+            let still = event.timestamp - lastDragTime > 0.08
+            session?.releaseGlobe(pointsPerSecond: still ? .zero : dragVelocity)
         }
         pressedAt = nil
     }
@@ -498,8 +538,14 @@ final class GraphLayerView: NSView {
 
     override func scrollWheel(with event: NSEvent) {
         if event.hasPreciseScrollingDeltas, !event.modifierFlags.contains(.command) {
-            // Two fingers on a trackpad pan; a wheel, or ⌘-scroll, zooms.
-            session?.pan(byPoints: CGSize(width: event.scrollingDeltaX, height: -event.scrollingDeltaY))
+            // Two fingers on a trackpad pan, or turn the globe; a wheel, or ⌘-scroll, zooms.
+            // The trackpad's own momentum carries a swipe on after the fingers lift.
+            let delta = CGSize(width: event.scrollingDeltaX, height: -event.scrollingDeltaY)
+            if session?.dragTurnsGlobe == true, !event.modifierFlags.contains(.option) {
+                session?.turnGlobe(byPoints: delta)
+            } else {
+                session?.pan(byPoints: delta)
+            }
         } else {
             let amount = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY * 0.01 : event.scrollingDeltaY * 0.08
             session?.zoom(by: Float(exp(amount)), at: location(event))

@@ -92,6 +92,8 @@ The globe also needs to know where this Mac is. It guesses from the time zone; t
 
 Whatever you select stays selected when you switch.
 
+The globe faces this Mac and sways slowly either side of it. Drag it, or swipe with two fingers, to turn it to any part of the world; let go mid-swipe and it spins on and slows. It stays where you leave it until you press **0**, which turns it back home. ⌥-drag moves the view instead. Its coastlines are Natural Earth's 1:110m, which is in the public domain and built in.
+
 ### Reading the graph
 
 - **Line thickness and pulses**: how much traffic, and which way most of it is going.
@@ -158,7 +160,7 @@ Choose *Save Current as Workspace…* to add your own. *Export Settings…* and 
 | E | Keep ended connections on screen |
 | B, I | Show or hide the panels, the inspector |
 | K | Kiosk mode |
-| 0 | Reset zoom and pan |
+| 0 | Reset zoom and pan, and turn the globe back home |
 | Esc | Leave focus or kiosk mode |
 
 ## Troubleshooting

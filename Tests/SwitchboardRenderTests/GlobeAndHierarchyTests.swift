@@ -101,6 +101,44 @@ private func drawn(_ id: NodeID, in controller: GraphController) -> NodeInstance
         #expect(controller.frame(labelBudget: 0).nodes[0].center == a)
     }
 
+    @Test func turnsByHandStaysTurnedAndGoesHomeOnReset() throws {
+        let (controller, _) = globe()
+        let sydney = NodeID.endpoint(IPAddress("4.4.4.4")!)
+        #expect(drawn(sydney, in: controller) == nil)
+        let home = controller.frame(labelBudget: 0).nodes[0].center
+        // Drag right by a little over half the globe's width: the surface follows the pointer,
+        // bringing Sydney, west across the Pacific, round to the front.
+        controller.turnGlobe(by: SIMD2(400, 0))
+        controller.settle()
+        let turned = controller.frame(labelBudget: 0).nodes[0].center
+        #expect(turned.x > home.x + 100)
+        #expect(controller.globeIsTurnedByHand)
+        #expect(drawn(sydney, in: controller) != nil)
+        // Left alone, it does not sway back.
+        controller.advance(time: 0)
+        controller.advance(time: 40)
+        controller.settle()
+        #expect(controller.frame(labelBudget: 0).nodes[0].center == turned)
+        // Let go mid-swipe, it spins on, slows, and stops.
+        controller.releaseGlobe(velocity: SIMD2(300, 0))
+        var last = turned
+        for tick in 1...200 {
+            controller.advance(time: 40 + Float(tick) / 60)
+        }
+        controller.settle()
+        last = controller.frame(labelBudget: 0).nodes[0].center
+        #expect(last != turned)
+        controller.advance(time: 50)
+        controller.advance(time: 50.05)
+        controller.settle()
+        #expect(controller.frame(labelBudget: 0).nodes[0].center == last)
+        // Reset faces home again.
+        controller.resetGlobe()
+        controller.settle()
+        #expect(!controller.globeIsTurnedByHand)
+        #expect(simd_distance(controller.frame(labelBudget: 0).nodes[0].center, home) < 1)
+    }
+
     @Test func lightingAProcessLightsItsArcs() throws {
         let (controller, _) = globe()
         let plain = controller.frame(labelBudget: 0)
@@ -112,10 +150,15 @@ private func drawn(_ id: NodeID, in controller: GraphController) -> NodeInstance
     }
 
     @Test func drawsTheLandAndTheGrid() {
-        #expect(WorldOutline.rings.count > 15)
+        // Natural Earth's 1:110m coastline: 134 lines, most of them closed; Antarctica and
+        // Russia are cut at the date line.
+        #expect(WorldOutline.rings.count > 100)
+        #expect(WorldOutline.rings.reduce(0) { $0 + $1.count } > 4000)
         for ring in WorldOutline.rings {
-            #expect(ring.first! == ring.last!)
+            #expect(ring.count >= 2)
             #expect(ring.allSatisfy { abs($0.0) <= 90 && abs($0.1) <= 180 })
+            // No piece jumps across the world, which would draw a line through the globe.
+            for (a, b) in zip(ring, ring.dropFirst()) { #expect(abs(a.1 - b.1) < 20) }
         }
         let lines = GlobeView.surface(scheme: .standard)
         #expect(lines.count > 1500)

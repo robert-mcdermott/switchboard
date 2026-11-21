@@ -99,7 +99,7 @@ struct GlobeView {
         }
         let land = scheme.host * 0.55 + Palette.secondaryText * 0.45
         for ring in WorldOutline.rings {
-            add(ring.map { (Double($0.0), Double($0.1)) }, halfWidth: 0.75, glow: 0.12, color: land)
+            add(ring.map { (Double($0.0), Double($0.1)) }, halfWidth: 0.8, glow: 0.16, color: land)
         }
         return lines
     }

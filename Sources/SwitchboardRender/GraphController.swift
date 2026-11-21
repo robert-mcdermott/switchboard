@@ -260,9 +260,17 @@ public final class GraphController: @unchecked Sendable {
     /// The globe's lines of latitude and longitude and the land, in world space.
     private var globeLines: [GlobeLine] = []
     private var globeView = GlobeView()
+    /// Set once someone drags the globe; it then stays where they put it until reset.
+    private var globeTurnedByHand = false
+    /// How fast the globe is still turning after being let go, in radians a second.
+    private var globeSpin = SIMD2<Float>.zero
+    private var lastAdvance: Float?
     /// Where this Mac is, for the globe.
     private var homePoint = GeoPoint.guess() {
-        didSet { globeView.face(homePoint) }
+        didSet {
+            globeView.face(homePoint)
+            globeTurnedByHand = false
+        }
     }
     /// Connections in the hierarchy are found on the leaf that stands for them.
     private var connectionNodes: [AddressEdge: NodeID] = [:]
@@ -937,13 +945,76 @@ public final class GraphController: @unchecked Sendable {
     public func advance(time: Float, motion: Bool = true) {
         lock.lock()
         defer { lock.unlock() }
+        let step = lastAdvance.map { min(max(time - $0, 0), 0.1) } ?? 0
+        lastAdvance = time
         guard layoutMode == .globe else { return }
+        if globeTurnedByHand {
+            // Where the person left it, still spinning a little if they let go mid-swipe.
+            guard motion, simd_length(globeSpin) > 0.002 else {
+                globeSpin = .zero
+                return
+            }
+            turn(by: globeSpin * step)
+            globeSpin *= exp(-2.2 * step)
+            reprojectGlobe()
+            return
+        }
         // A slow sway either side of home, so this Mac never goes round the back.
         let sway: Float = motion ? 0.6 * sin(time * 2 * .pi / 160) : 0
         let wanted = globeView.homeLongitude + sway
         guard abs(wanted - globeView.longitude) > 1e-5 else { return }
         globeView.longitude = wanted
         reprojectGlobe()
+    }
+
+    /// Turns the globe by a drag of `distance`, in world units: the surface under the
+    /// pointer follows it. The globe then stays where it is put, without swaying.
+    public func turnGlobe(by distance: SIMD2<Float>) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard layoutMode == .globe else { return }
+        globeTurnedByHand = true
+        globeSpin = .zero
+        turn(by: distance / globeView.radius)
+        reprojectGlobe()
+    }
+
+    /// Lets go of the globe moving at `velocity`, in world units a second; it slows to a stop.
+    public func releaseGlobe(velocity: SIMD2<Float>) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard layoutMode == .globe, globeTurnedByHand else { return }
+        // A flick, not a throw: cap how fast it can spin.
+        let spin = velocity / globeView.radius
+        let speed = simd_length(spin)
+        globeSpin = speed > 4 ? spin * (4 / speed) : spin
+    }
+
+    /// Faces home again, and swaying resumes.
+    public func resetGlobe() {
+        lock.lock()
+        defer { lock.unlock() }
+        globeTurnedByHand = false
+        globeSpin = .zero
+        globeView.face(homePoint)
+        if layoutMode == .globe { reprojectGlobe() }
+    }
+
+    /// Whether the globe has been turned by hand since it last faced home.
+    public var globeIsTurnedByHand: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return globeTurnedByHand
+    }
+
+    /// Turns by an angle in radians: across changes longitude, up and down leans the poles. Holds `lock`.
+    private func turn(by angle: SIMD2<Float>) {
+        // A point at the front moves the way the pointer does: right for a larger x, up for a larger y.
+        globeView.longitude -= angle.x
+        globeView.tilt = min(max(globeView.tilt - angle.y, -1.35), 1.35)
+        // Keep the longitude in one turn so it never grows without bound.
+        if globeView.longitude > .pi { globeView.longitude -= 2 * .pi }
+        if globeView.longitude < -.pi { globeView.longitude += 2 * .pi }
     }
 
     /// Projects every node, arc, and line of the globe for its current turn. Holds `lock`.
