@@ -271,7 +271,7 @@ struct TopBar: View {
                     .onSubmit { model.applyFilter() }
                     .onChange(of: model.filterText) { model.applyFilter() }
                 if !model.filterText.isEmpty {
-                    Button { model.clearFilter() } label: { Image(systemName: "xmark.circle.fill") }
+                    Button { model.clearFilter() } label: { Image(systemName: "xmark.circle.fill").accessibilityLabel("Clear filter") }
                         .buttonStyle(.plain)
                         .foregroundStyle(Color.dim)
                         .help("Clear the filter")
@@ -295,13 +295,13 @@ struct TopBar: View {
                         }
                     }
                 } label: {
-                    Image(systemName: "star")
+                    Image(systemName: "star").accessibilityLabel("Saved filters")
                 }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
                 .help("Saved filters")
-                Button { showHelp.toggle() } label: { Image(systemName: "questionmark.circle") }
+                Button { showHelp.toggle() } label: { Image(systemName: "questionmark.circle").accessibilityLabel("Filter help") }
                     .buttonStyle(.plain)
                     .foregroundStyle(Color.dim)
                     .help("Filter fields")
@@ -342,11 +342,11 @@ struct TopBar: View {
                 .layoutPriority(-1)
 
             Picker("Layout", selection: Binding(get: { model.layout }, set: { model.setLayout($0) })) {
-                Image(systemName: "circle.hexagongrid").tag(GraphLayout.constellation).help("Constellation (1)")
-                Image(systemName: "arrow.triangle.branch").tag(GraphLayout.flow).help("Flow: processes, services, owners (2)")
-                Image(systemName: "chart.bar.doc.horizontal").tag(GraphLayout.lanes).help("Lanes: each connection over time (3)")
-                Image(systemName: "globe").tag(GraphLayout.globe).help("Globe: where destinations are (4)")
-                Image(systemName: "list.bullet.indent").tag(GraphLayout.hierarchy).help("Hierarchy: account, process, domain, address (5)")
+                Image(systemName: "circle.hexagongrid").accessibilityLabel("Constellation").tag(GraphLayout.constellation).help("Constellation (1)")
+                Image(systemName: "arrow.triangle.branch").accessibilityLabel("Flow").tag(GraphLayout.flow).help("Flow: processes, services, owners (2)")
+                Image(systemName: "chart.bar.doc.horizontal").accessibilityLabel("Lanes").tag(GraphLayout.lanes).help("Lanes: each connection over time (3)")
+                Image(systemName: "globe").accessibilityLabel("Globe").tag(GraphLayout.globe).help("Globe: where destinations are (4)")
+                Image(systemName: "list.bullet.indent").accessibilityLabel("Hierarchy").tag(GraphLayout.hierarchy).help("Hierarchy: account, process, domain, address (5)")
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -362,16 +362,16 @@ struct TopBar: View {
             .help("How much motion and glow to use. The data shown is the same.")
 
             Toggle(isOn: Binding(get: { model.keepEnded }, set: { model.setKeepEnded($0) })) {
-                Image(systemName: "clock.arrow.circlepath")
+                Image(systemName: "clock.arrow.circlepath").accessibilityLabel("Keep ended connections")
             }
             .toggleStyle(.button)
             .help("Keep ended connections on the graph, subdued, instead of letting them fade away (E)")
             .contextMenu {
                 Button("Forget ended connections") { model.clearEnded() }
             }
-            Button { model.showPanel.toggle() } label: { Image(systemName: "rectangle.bottomthird.inset.filled") }
+            Button { model.showPanel.toggle() } label: { Image(systemName: "rectangle.bottomthird.inset.filled").accessibilityLabel("Panels") }
                 .help("Show or hide the panels (B)")
-            Button { model.showInspector.toggle() } label: { Image(systemName: "sidebar.right") }
+            Button { model.showInspector.toggle() } label: { Image(systemName: "sidebar.right").accessibilityLabel("Inspector") }
                 .help("Show or hide the inspector (I)")
         }
         .buttonStyle(.borderless)

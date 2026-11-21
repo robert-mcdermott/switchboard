@@ -250,6 +250,11 @@ public final class GraphSession: NSObject {
         hoverTimer = nil
     }
 
+    /// What VoiceOver says the graph shows. Set about once a second.
+    public func setAccessibilitySummary(_ text: String) {
+        view?.setAccessibilityValue(text)
+    }
+
     /// The view's size in pixels, from the main thread, for the render thread.
     func setDrawableSize(_ size: CGSize, backing: Float) {
         loop?.change {
@@ -378,6 +383,11 @@ final class GraphLayerView: NSView {
         metalLayer.backgroundColor = CGColor(red: 5 / 255, green: 8 / 255, blue: 15 / 255, alpha: 1)
         wantsLayer = true
         layerContentsRedrawPolicy = .never
+        // VoiceOver hears a summary; the tables under the graph hold the same facts row by row.
+        setAccessibilityElement(true)
+        setAccessibilityRole(.group)
+        setAccessibilityLabel("Network graph")
+        setAccessibilityHelp("A picture of this Mac's connections. The Connections table below lists them one by one.")
     }
 
     @available(*, unavailable)

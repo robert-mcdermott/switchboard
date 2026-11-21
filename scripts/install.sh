@@ -1,7 +1,8 @@
 #!/bin/bash
 # Installs the Switchboard collector as a system service.
 #
-#   sudo scripts/install.sh
+#   sudo scripts/install.sh                                build from source and install
+#   sudo scripts/install.sh --binary bin/switchboardd      install a collector from a release zip
 #
 # What it does, and nothing else:
 #   1. builds switchboardd if it is not built (as you, not as root)
@@ -24,12 +25,19 @@ BINARY="/usr/local/libexec/switchboardd"
 PLIST="/Library/LaunchDaemons/$LABEL.plist"
 LOG="/var/log/switchboardd.log"
 
-# Build as the person who ran sudo, so the build directory does not end up owned by root.
-BUILDER="${SUDO_USER:-root}"
-echo "==> Building the collector (as $BUILDER)"
-sudo -u "$BUILDER" swift build --package-path "$ROOT" -c release --product switchboardd
-SOURCE="$(sudo -u "$BUILDER" swift build --package-path "$ROOT" -c release --show-bin-path)/switchboardd"
-[ -x "$SOURCE" ] || { echo "build did not produce $SOURCE" >&2; exit 1; }
+if [ "${1:-}" = "--binary" ] && [ -n "${2:-}" ]; then
+  # From a release zip: install the collector it came with.
+  SOURCE="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"
+  [ -x "$SOURCE" ] || { echo "no collector at $2" >&2; exit 1; }
+  echo "==> Using $SOURCE"
+else
+  # Build as the person who ran sudo, so the build directory does not end up owned by root.
+  BUILDER="${SUDO_USER:-root}"
+  echo "==> Building the collector (as $BUILDER)"
+  sudo -u "$BUILDER" swift build --package-path "$ROOT" -c release --product switchboardd
+  SOURCE="$(sudo -u "$BUILDER" swift build --package-path "$ROOT" -c release --show-bin-path)/switchboardd"
+  [ -x "$SOURCE" ] || { echo "build did not produce $SOURCE" >&2; exit 1; }
+fi
 
 echo "==> Installing $BINARY"
 if launchctl print "system/$LABEL" >/dev/null 2>&1; then

@@ -14,6 +14,9 @@ struct SwitchboardApp: App {
         }
         .defaultSize(width: 1440, height: 900)
         .commands {
+            CommandGroup(replacing: .appInfo) {
+                AboutMenuItem()
+            }
             CommandMenu("Workspace") {
                 ForEach(Array(GraphLayout.allCases.enumerated()), id: \.element) { offset, layout in
                     Button(layout.rawValue.capitalized) { model.setLayout(layout) }
@@ -50,6 +53,20 @@ struct SwitchboardApp: App {
         Settings {
             SettingsView()
         }
+
+        Window("About Switchboard", id: "about") {
+            AboutView()
+        }
+        .windowResizability(.contentSize)
+    }
+}
+
+/// Opens the About window, which says what is collected and kept.
+struct AboutMenuItem: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("About Switchboard: What It Collects") { openWindow(id: "about") }
     }
 }
 

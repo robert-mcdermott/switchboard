@@ -880,6 +880,10 @@ final class AppModel {
         if focused != isFocused { focused = isFocused }
         let ended = keepEnded ? session.controller.endedCount : 0
         if endedCount != ended { endedCount = ended }
+        let busiest = talkers.prefix(3).map { "\($0.name), \(ByteFormat.rate($0.rate))" }.joined(separator: "; ")
+        session.setAccessibilitySummary(
+            "\(layout.rawValue.capitalized) layout. \(statusLine.replacingOccurrences(of: "·", with: ",")). "
+                + (busiest.isEmpty ? "" : "Busiest: \(busiest)."))
     }
 
     private func receive(_ snapshot: EngineSnapshot) {
