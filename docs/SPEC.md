@@ -465,7 +465,7 @@ Named workspaces save layout, panels, filters, and profile; three ship by defaul
 | Frame rate | 60 fps floor, 120 fps on ProMotion, at 5,000 nodes and 2,000 active edges. Measured in M8 with drawing on its own thread: Operator holds 60 fps with no frame over 16.7 ms at 5,129 nodes and 5,147 edges; Cinema holds 120 fps at 2,088 nodes and averages 109 fps at 5,129, where the GPU limits its slowest frames |
 | Engine CPU | < 1% idle (measured 0.11% live in M8); < 3% with 2,000 sockets (0.28% at 1,810 simulated) |
 | App CPU | < 10% in Operator profile at typical load (measured 12–17% in M8: not yet met) |
-| Memory | Collector < 60 MB (measured 11 MB); app < 400 MB with a 1 h window (279 MB footprint at five minutes in M8) |
+| Memory | Collector < 60 MB (measured 11 MB); app < 400 MB with a 1 h window (M8: 314 MB resident with the hour full, over a 2.5-hour soak, still rising about 9 MB an hour) |
 | Network impact | Zero in Off and Passive modes |
 
 Budgets are measured by `sbctl bench` and the simulator, not by eye, and are checked at every milestone.

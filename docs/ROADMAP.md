@@ -262,7 +262,7 @@ M4 and M5 are independent of each other and can proceed in parallel once M3 clos
 
 **Exit:** every success metric below is met and written down with its measurement.
 
-**Status: underway; exit criterion not met.** The graph now draws on its own thread (slowest 1% of frames 31 ms → 9 ms with the panels open). Memory is down from 630 MB to 279 MB and Operator CPU from 26% to 12–17%. Operator holds 60 fps at 5,129 nodes. The About window, accessibility labels, a guide, and a release script are done. Still short: app CPU in Operator is over its 10% budget; Cinema does not hold 60 fps at 5,000 nodes; no 72-hour soak, VoiceOver session, packet capture, or usability test. 204 tests pass. Details in [spikes/M8-findings.md](spikes/M8-findings.md).
+**Status: underway; exit criterion not met.** The graph now draws on its own thread (slowest 1% of frames 31 ms → 9 ms with the panels open). Memory is down from 630 MB to 279 MB and Operator CPU from 26% to 12–17%. Operator holds 60 fps at 5,129 nodes. A 2.5-hour soak found and fixed a leak; afterwards memory with an hour of history was 314 MB, within budget but still rising about 9 MB an hour. The About window, accessibility labels, a guide, and a release script are done. Still short: app CPU in Operator is over its 10% budget; Cinema does not hold 60 fps at 5,000 nodes; no 72-hour soak, VoiceOver session, packet capture, or usability test. 204 tests pass. Details in [spikes/M8-findings.md](spikes/M8-findings.md).
 
 ---
 

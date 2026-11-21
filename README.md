@@ -178,6 +178,7 @@ The second renders reference scenes and compares them with golden images.
 
 - Without the collector, roughly 5 to 8 percent of your own account's sockets are not reported by the system.
 - The app uses 12–17% of a core in the Operator profile, over its 10% budget.
+- It has run for 2.5 hours at a stretch, not days. Memory with an hour of history was about 315 MB and still creeping up slowly.
 - The globe's coastlines are a coarse hand-drawn outline.
 - Kiosk mode has not had a long unattended run, and moving between displays is untested.
 - QUIC connections get names from DNS only, and encrypted DNS, ECH, and Private Relay all reduce what any observer on the machine can name.

@@ -15,7 +15,7 @@ Hardening: making Switchboard trustworthy to leave running. Measured on macOS 27
 | Engine CPU, 2,000 sockets | < 3% | 0.28% at 1,810 simulated flows | Yes |
 | App CPU, Operator, typical | < 10% | 12–17%, varying with live traffic | **No** |
 | Collector memory | < 60 MB | 10–11 MB, flat over 74 minutes | Yes |
-| App memory, 1 h window | < 400 MB | 279 MB footprint after five minutes; the one-hour figure is from the soak below | See the soak |
+| App memory, 1 h window | < 400 MB | 314 MB resident with the hour full (median over 2.5 hours, peaks to 369 MB), still rising about 9 MB an hour; see the soak | Yes over 2.5 hours; not shown flat |
 | Network impact, Off and Passive | Zero | The running app holds no internet sockets at all: `lsof` on its process shows one Unix socket (to the collector) and no others among its 68 open files | Yes, by inspection; no packet capture taken |
 
 ## What changed
@@ -87,7 +87,32 @@ The worst frames, 162 ms at minute 11 and 2.7 s at minute 68, are my own doing: 
 
 The same heap listing shows where the hour of history goes: 1,083 lists of connections, 83 MB in all, and 928 lists of processes (17.5 MB) that were meant to be shared between snapshots. An unchanged "still unknown" signature verdict counted as a change four times a second; it no longer does, but processes coming and going still make most lists distinct.
 
-**Fixed build** (2.5 hours, Cinema, panels open, a full hour of timeline, nothing else running): started at 04:30; results are added here when it finishes.
+**Fixed build** (2.5 hours from 04:25, Cinema, panels open, a full hour of timeline, nothing else measuring it). The display turned itself off at 06:37 when another program's keep-awake timer ran out; the soak keeps the Mac awake but not the display. Drawing stopped with it, which is correct, so the table splits there:
+
+| | Display on (5–132 min) | Display off (134–151 min) |
+|---|---|---|
+| App memory (resident), median | 314 MB | 299 MB |
+| App memory, range | 200–369 MB | 243–319 MB |
+| App CPU | 24.5% median, 19–28% | 7.5% median, 7–8% |
+| Frames per second | 118 median, 116.5–118.8 | none drawn |
+| Slowest 1% of frames | 14.6 ms median, 10–16 ms | |
+| Worst frame in each minute | 41 ms median, 17–67 ms | |
+| Collector | 11.2 MB, 1.1% CPU; 10.4–15.5 MB | the same |
+| Log | 4.1 MB at the start | 136.5 MB at the end: 53 MB an hour |
+
+Memory while the hour of history fills, then after (median of each ten minutes):
+
+| Minutes | 5–15 | 25–35 | 55–65 | 70–80 | 85–95 | 100–110 | 115–126 |
+|---|---|---|---|---|---|---|---|
+| Resident | 253 MB | 272 MB | 307 MB | 314 MB | 316 MB | 318 MB | 321 MB |
+
+What this shows:
+
+- **Within the 400 MB budget** for a one-hour window: the median is 314 MB once the hour is full. Short peaks reach 369 MB.
+- **Not yet flat.** After the hour filled, resident memory still rose about 9 MB an hour, from 314 to 321 MB over 50 minutes. That is a tenth of the leak's rate, and could be caches that stop growing (names and addresses seen so far), but 2.5 hours cannot tell that apart from a slow leak. At that rate a 72-hour run would cross 400 MB after about nine more hours. Comparing two `heap` listings an hour apart is the next step, and a 72-hour soak the real answer.
+- **CPU with nothing drawn is 7.5%.** That is the feed, the history, and the panels' tables, which keep updating while the display is off. The tables could stop updating while the window is not visible.
+- **One frame each minute takes about 40 ms**, while the slowest 1% stay under 16 ms. Something periodic stalls the render thread for two or three frames; not found yet.
+- **AppKit warned 1,930 times** that the app "performed a reentrant operation in its NSTableView delegate", about once every five seconds, and says this will become an assertion. It comes from SwiftUI's `Table` updating rows while AppKit is asking about them. The same tables are most of the main thread's CPU, so replacing them would fix both.
 
 ### The log grows faster than expected on this Mac
 
@@ -108,6 +133,9 @@ The log grew about 57 MB an hour. The soak's log held 218,566 connections after 
 ## Not done, not verified
 
 - App CPU in Operator is 12–17%, over the 10% budget.
+- App memory still rose about 9 MB an hour after the hour of history filled; whether it levels off is unknown.
+- One frame a minute takes about 40 ms; the cause is not found.
+- SwiftUI's tables trigger an AppKit warning about reentrant table updates every few seconds.
 - Cinema at 5,000 nodes does not hold a 60 fps floor; the GPU is the limit at this window size.
 - Event-to-screen and hover-to-tooltip latencies were not timed.
 - No 72-hour soak, and no eight-hour unattended run on a second display (the M7 exit criterion).
