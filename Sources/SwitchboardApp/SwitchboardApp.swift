@@ -100,6 +100,7 @@ struct SettingsView: View {
     @AppStorage("tagLists") private var tagLists = ""
     @AppStorage("lanesMinutes") private var lanesMinutes = 10.0
     @AppStorage("homeLocation") private var homeLocation = ""
+    @AppStorage("logSkipLoopback") private var logSkipLoopback = false
     @AppStorage("logDetail") private var logDetail = "standard"
     @AppStorage("logDays") private var logDays = 30.0
     @AppStorage("logMegabytes") private var logMegabytes = 2000.0
@@ -190,6 +191,9 @@ struct SettingsView: View {
                     Text("All of that, and a byte count each second").tag("detailed")
                 }
                 .disabled(!logging)
+                Toggle("Leave out connections within this Mac", isOn: $logSkipLoopback)
+                    .disabled(!logging)
+                    .help("Development tools and containers can open hundreds of connections a minute to this Mac itself. They still show live; they are just not written down.")
                 Stepper("Keep \(Int(logDays)) days", value: $logDays, in: 1...365, step: 1).disabled(!logging)
                 Stepper("Keep at most \(Int(logMegabytes)) MB", value: $logMegabytes, in: 100...20_000, step: 100).disabled(!logging)
                 Text("The log stays on this Mac, in Application Support. Turning logging on or off, or changing the detail, takes effect the next time Switchboard starts.")

@@ -125,6 +125,14 @@ public final class LogStore: @unchecked Sendable {
         set { queue.async { self.detailLevel = newValue } }
     }
 
+    /// Leaves out connections from this Mac to itself. Development tools and container
+    /// runtimes can open hundreds a minute, which on some machines are most of the log.
+    public var excludesLoopback: Bool {
+        get { queue.sync { skipLoopback } }
+        set { queue.async { self.skipLoopback = newValue } }
+    }
+    private var skipLoopback = false
+
     private func migrate() throws {
         let version = try database.scalar("PRAGMA user_version")
         if version < 1 { try createSchema() }
@@ -251,6 +259,7 @@ public final class LogStore: @unchecked Sendable {
         }
 
         for flow in snapshot.flows {
+            if skipLoopback, flow.key.remote.address.isLoopback { continue }
             let tuple = Tuple(pid: flow.pid, key: flow.key)
             if flow.state == .closed {
                 let closedAt = wall(flow.closedAt ?? snapshot.time)

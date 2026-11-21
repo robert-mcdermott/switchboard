@@ -39,7 +39,7 @@ struct Configuration: Codable {
     /// The settings that travel. The log's location and the window's size do not.
     static let keys = [
         "clustering", "clusterThreshold", "palette", "historyMinutes", "profile", "hostnames", "logging", "tagLists",
-        "logDetail", "logDays", "logMegabytes", "layout", "lanesMinutes", "keepEnded", "homeLocation",
+        "logDetail", "logDays", "logMegabytes", "layout", "lanesMinutes", "keepEnded", "homeLocation", "logSkipLoopback",
     ]
 
     static func current(workspaces: [Workspace], defaults: UserDefaults = .standard) -> Configuration {
@@ -54,7 +54,7 @@ struct Configuration: Codable {
     /// Writes the settings back, each as the type its reader expects.
     func apply(to defaults: UserDefaults = .standard) {
         let numbers: Set = ["clusterThreshold", "historyMinutes", "logDays", "logMegabytes", "lanesMinutes"]
-        let switches: Set = ["logging", "keepEnded"]
+        let switches: Set = ["logging", "keepEnded", "logSkipLoopback"]
         for (key, value) in settings where Self.keys.contains(key) {
             if numbers.contains(key) {
                 if let number = Double(value) { defaults.set(key == "clusterThreshold" ? Int(number) as Any : number as Any, forKey: key) }

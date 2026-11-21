@@ -154,3 +154,23 @@ private struct ByFirstByte: AddressEnricher {
         #expect(try fixture.store.stats().flows >= after.matched)
     }
 }
+
+@Suite struct LoopbackLogTests {
+    @Test func canLeaveOutConnectionsWithinThisMac() throws {
+        func seen(_ id: UInt64, _ remote: String) -> SourceEvent {
+            .seen(SocketObservation(
+                sourceID: id, proto: .tcp, local: Endpoint(address: IPAddress(remote.contains(":") ? "::1" : "127.0.0.1")!, port: UInt16(40_000 + id)),
+                remote: Endpoint(address: IPAddress(remote)!, port: 5432), pid: 9, processName: "app", tcpState: .established))
+        }
+        for skip in [false, true] {
+            let fixture = try Fixture()
+            fixture.store.excludesLoopback = skip
+            fixture.engine.ingest([seen(1, "127.0.0.1"), seen(2, "::1"), seen(3, "8.8.8.8")], from: "t", at: 1)
+            fixture.store.record(fixture.engine.snapshot())
+            fixture.store.flush()
+            let logged = try fixture.store.query(.all, from: fixture.all.from, to: fixture.all.to, limit: 100)
+            #expect(logged.matched == (skip ? 1 : 3), "skip \(skip)")
+            #expect(logged.entries.contains { $0.flow.key.remote.address.description == "8.8.8.8" })
+        }
+    }
+}

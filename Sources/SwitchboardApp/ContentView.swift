@@ -174,7 +174,7 @@ private struct HoverLayer: View {
 
 /// One line of text that changes often. The closure is read inside this view's body, so
 /// only this view depends on what it reads.
-private struct ReadoutText: View {
+struct ReadoutText: View {
     let text: () -> String
     let size: CGFloat
     let color: Color

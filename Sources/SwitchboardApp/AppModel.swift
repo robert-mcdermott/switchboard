@@ -487,6 +487,9 @@ final class AppModel {
         window.maximumAge = max(minutes, 1) * 60
         session.controller.lanesWindow = max(defaults.object(forKey: "lanesMinutes") as? Double ?? 10, 0.5) * 60
         session.controller.home = (defaults.string(forKey: "homeLocation")).flatMap(GeoPoint.init) ?? GeoPoint.guess()
+        if let store, store.excludesLoopback != defaults.bool(forKey: "logSkipLoopback") {
+            store.excludesLoopback = defaults.bool(forKey: "logSkipLoopback")
+        }
     }
 
     /// What the command line asked for that needs the window to exist first.
@@ -691,6 +694,7 @@ final class AppModel {
         do {
             let detail = UserDefaults.standard.string(forKey: "logDetail").flatMap(LogDetail.init(rawValue:)) ?? .standard
             let store = try LogStore(url: path.map { URL(fileURLWithPath: $0) } ?? LogStore.defaultURL(), detail: detail)
+            store.excludesLoopback = UserDefaults.standard.bool(forKey: "logSkipLoopback")
             store.onFirstSeen = { [weak self] addresses in
                 Task { @MainActor in self?.noteFirstSeen(addresses) }
             }

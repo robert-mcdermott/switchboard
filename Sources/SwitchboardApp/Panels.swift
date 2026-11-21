@@ -27,7 +27,8 @@ struct BottomPanel: View {
                     .buttonStyle(.plain)
                 }
                 Spacer()
-                Text(model.matchLine).font(.mono(10)).foregroundStyle(Color.dim).padding(.trailing, 12)
+                // In a view of its own: the count changes every second, the tab strip does not.
+                ReadoutText(text: { model.matchLine }, size: 10, color: Color.dim).padding(.trailing, 12)
             }
             Rectangle().fill(Color.hairline).frame(height: 1)
 
