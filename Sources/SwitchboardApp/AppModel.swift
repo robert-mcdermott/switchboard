@@ -2,75 +2,139 @@ import AppKit
 import Observation
 import SwitchboardCore
 import SwitchboardRender
+import SwitchboardSources
 
 @MainActor
 @Observable
 final class AppModel {
-    let stats = FrameStats()
-    /// Present only in spike-report mode, so normal runs keep a framebuffer-only drawable.
-    let capture: FrameCapture?
-    let edgeCount: Int
+    let session: GraphSession
+    let sourceSpec: String
     /// When set, the app measures itself for a few seconds, writes a report here, and quits.
-    let spikeReportPath: String?
+    let measurePath: String?
 
-    var rendererInfo: PrototypeRenderer.Info?
-    var rendererError: String?
-    var summary = FrameStats.Summary()
+    var summary = LiveFeed.Summary()
+    var frames = FrameStats.Summary()
+    var hover: HoverInfo?
+    var hoverPoint: CGPoint = .zero
+    var paused = false
+    var profile: RenderProfile
+    var failure: String?
+    var simulated = false
+
+    @ObservationIgnored private var feed: LiveFeed?
+    @ObservationIgnored private var observers: [NSObjectProtocol] = []
 
     init() {
         let arguments = CommandLine.arguments
-        func value(after flag: String) -> String? {
+        func value(_ flag: String) -> String? {
             guard let index = arguments.firstIndex(of: flag), arguments.indices.contains(index + 1) else { return nil }
             return arguments[index + 1]
         }
-        edgeCount = value(after: "--edges").flatMap(Int.init).map { min(max($0, 1), 200_000) } ?? 1000
-        spikeReportPath = value(after: "--spike-report")
-        capture = spikeReportPath == nil ? nil : FrameCapture()
+        sourceSpec = value("--source") ?? "nstat"
+        measurePath = value("--measure")
+
+        // Respect the system setting: no motion unless the user has said otherwise.
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        profile = value("--profile").flatMap(RenderProfile.init(rawValue:)) ?? (reduceMotion ? .still : .cinema)
+
+        let hostName = Host.current().localizedName ?? "This Mac"
+        let controller = GraphController(hostLabel: hostName.uppercased())
+        session = GraphSession(controller: controller)
+        session.profile = profile
+        if measurePath != nil { session.capture = FrameCapture() }
+
+        session.onHover = { [weak self] info, point in
+            self?.hover = info
+            self?.hoverPoint = point
+        }
+        session.onFailure = { [weak self] message in self?.failure = message }
+        session.onKey = { [weak self] key in
+            guard let self else { return }
+            switch key {
+            case .togglePause: togglePause()
+            case .cycleProfile: setProfile(profile.next)
+            case .resetView: break
+            }
+        }
+
+        do {
+            let epoch = CACurrentMediaTime()
+            let feed = try LiveFeed(
+                spec: sourceSpec, flows: value("--flows").flatMap(Int.init), controller: controller,
+                clock: { Float(CACurrentMediaTime() - epoch) },
+                onSummary: { [weak self] summary in
+                    Task { @MainActor in self?.summary = summary }
+                })
+            simulated = feed.simulated
+            self.feed = feed
+            feed.start()
+            feed.setForeground(NSApplication.shared.isActive)
+        } catch {
+            failure = "\(error)"
+        }
+
+        let center = NotificationCenter.default
+        observers.append(center.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.feed?.setForeground(true) }
+        })
+        observers.append(center.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.feed?.setForeground(false) }
+        })
     }
 
-    var statusLine: String {
-        summary.frames == 0 ? "Starting…" : String(format: "%.0f fps · %d edges", summary.framesPerSecond, edgeCount)
+    func togglePause() {
+        paused.toggle()
+        session.controller.paused = paused
+    }
+
+    func setProfile(_ next: RenderProfile) {
+        profile = next
+        session.profile = next
     }
 
     func refresh() {
-        summary = stats.summary()
+        frames = session.stats.summary()
     }
 
-    func rendererReady(_ result: Result<PrototypeRenderer.Info, Error>) {
-        switch result {
-        case .success(let info): rendererInfo = info
-        case .failure(let error): rendererError = "\(error)"
-        }
+    var statusLine: String {
+        "\(summary.flows) connections · ↓ \(ByteFormat.rate(summary.rateIn)) ↑ \(ByteFormat.rate(summary.rateOut))"
     }
 
-    /// Facts for spikes S4 and S5, gathered from inside the running app.
-    func writeSpikeReport(to path: String, measured: FrameStats.Summary) {
-        let windows = NSApplication.shared.windows.map {
-            ["class": $0.className, "title": $0.title, "visible": $0.isVisible] as [String: Any]
+    /// Standalone shows the login user's processes only; say so rather than imply more.
+    var modeLine: String {
+        if simulated { return "SIMULATED TRAFFIC · \(sourceSpec)" }
+        return getuid() == 0 ? "STANDALONE · all users" : "STANDALONE · your processes only"
+    }
+
+    /// Facts about a run, gathered from inside the app, for scripts/measure.sh.
+    func writeMeasurement(to path: String, measured: FrameStats.Summary) {
+        let windows = NSApplication.shared.windows.map { "\($0.className)|\($0.title)" }
+        let processStart = ProcessTable.bsdInfo(of: getpid()).map {
+            Double($0.pbi_start_tvsec) + Double($0.pbi_start_tvusec) / 1e6
         }
-        let screen = NSScreen.main
+        let firstData = session.firstDataFrame?.timeIntervalSince1970
         let report: [String: Any] = [
             "version": Switchboard.version,
-            "bundlePath": Bundle.main.bundlePath,
-            "bundleIdentifier": Bundle.main.bundleIdentifier ?? "",
-            "resourceOrigin": rendererInfo?.resourceOrigin.rawValue ?? "",
-            "rendererError": rendererError ?? "",
-            "device": rendererInfo?.deviceName ?? "",
-            "edges": rendererInfo?.edgeCount ?? 0,
-            "shaderCompileMS": rendererInfo?.shaderCompileMS ?? -1,
-            "screenMaxFPS": screen?.maximumFramesPerSecond ?? 0,
-            "screenScale": screen?.backingScaleFactor ?? 0,
+            "source": sourceSpec,
+            "profile": profile.rawValue,
+            "device": session.rendererInfo?.deviceName ?? "",
+            "resourceOrigin": session.rendererInfo?.resourceOrigin.rawValue ?? "",
+            "shaderCompileMS": session.rendererInfo?.shaderCompileMS ?? -1,
+            "failure": failure ?? "",
+            "nodes": session.nodeCount,
+            "edges": session.edgeCount,
+            "flows": summary.flows,
+            "launchToFirstDataSeconds": (processStart != nil && firstData != nil) ? firstData! - processStart! : -1,
+            "screenMaxFPS": NSScreen.main?.maximumFramesPerSecond ?? 0,
             "windowPixels": NSApplication.shared.windows.first { $0.title == "Switchboard" }.map {
                 let size = $0.convertToBacking($0.contentLayoutRect).size
                 return "\(Int(size.width))x\(Int(size.height))"
             } ?? "",
-            "appIsActive": NSApplication.shared.isActive,
             "frames": measured.frames,
             "fps": measured.framesPerSecond,
             "medianIntervalMS": measured.medianIntervalMS,
             "p99IntervalMS": measured.p99IntervalMS,
             "worstIntervalMS": measured.worstIntervalMS,
-            "meanEncodeMS": measured.meanEncodeMS,
             "meanGPUMS": measured.meanGPUMS,
             "p99GPUMS": measured.p99GPUMS,
             "windows": windows,

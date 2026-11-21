@@ -35,48 +35,19 @@ struct Options {
     }
 }
 
-enum SessionError: Error, CustomStringConvertible {
-    case unknownSource(String)
-
-    var description: String {
-        switch self {
-        case .unknownSource(let text):
-            "unknown source '\(text)'. Use nstat, nettop, nstat+nettop, sim:<\(SimulatorSource.Scenario.allCases.map(\.rawValue).joined(separator: "|"))>, or trace:<file>"
-        }
-    }
-}
-
 /// An engine and the sources feeding it, ticked by whoever owns the session.
 final class Session {
     let engine: FlowEngine
     let sources: [any FlowSource]
+    /// Synthetic or recorded traffic, which can be stepped on a simulated clock.
+    let simulated: Bool
     private let startedAt = DispatchTime.now().uptimeNanoseconds
 
     init(sourceSpec: String, flows: Int? = nil, counterInterval: Double = 1.0) throws {
-        var sources: [any FlowSource] = []
-        var simulated = false
-        for part in sourceSpec.split(separator: "+") {
-            switch part {
-            case "nstat": sources.append(NStatSource(counterInterval: counterInterval))
-            case "nettop": sources.append(NettopSource())
-            case let text where text.hasPrefix("sim:"):
-                guard let scenario = SimulatorSource.Scenario(rawValue: String(text.dropFirst(4))) else {
-                    throw SessionError.unknownSource(sourceSpec)
-                }
-                sources.append(SimulatorSource(scenario: scenario, flows: flows))
-                simulated = true
-            case let text where text.hasPrefix("trace:"):
-                let trace = try TraceFile.read(URL(fileURLWithPath: String(text.dropFirst(6))))
-                sources.append(TraceReplaySource(records: trace.records))
-                simulated = true
-            default:
-                throw SessionError.unknownSource(sourceSpec)
-            }
-        }
-        guard !sources.isEmpty else { throw SessionError.unknownSource(sourceSpec) }
-        self.sources = sources
-        // Simulated and replayed processes do not exist, so there is nothing to look up.
-        engine = FlowEngine(resolver: simulated ? PassthroughProcessResolver() : LibProcResolver())
+        let resolved = try SourceSpec.make(sourceSpec, flows: flows, counterInterval: counterInterval)
+        sources = resolved.sources
+        simulated = resolved.simulated
+        engine = FlowEngine(resolver: SourceSpec.resolver(for: resolved))
         engine.wallClockOrigin = Date().timeIntervalSince1970
     }
 

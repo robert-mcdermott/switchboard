@@ -104,6 +104,8 @@ M4 and M5 are independent of each other and can proceed in parallel once M3 clos
 
 **Exit:** launch to live graph in under two seconds, no setup; 60 fps at the 5k stress scenario; a first-time viewer can tell which process is busiest without being told how to read it.
 
+**Status: built; two exit criteria need a person.** Launch to first data is 0.6–0.8 s, the live graph runs at 119 fps, and the stress scene averages 110 fps with a worst frame of 25 ms. Golden images are pixel-stable and tooltip values match the engine exactly. Still open: nobody has yet driven the pointer and keyboard by hand, and the first-time-viewer test has not been run. Details in [spikes/M2-findings.md](spikes/M2-findings.md).
+
 **Checkpoint with the owner:** this is the first look at the visual identity. Palette, glow level, and default profile are cheap to change here and expensive later.
 
 ---
@@ -113,6 +115,7 @@ M4 and M5 are independent of each other and can proceed in parallel once M3 clos
 **Goal:** from impressive to useful. Pass the five-second test.
 
 **Build**
+- Carried from M2: a true 5,000-node stress test and frame pacing, and loopback connections drawn as process-to-process edges.
 - Window layout (§10): graph in the centre, inspector on the right, dockable panels below, top bar.
 - Inspector for flows, processes, endpoints, clusters.
 - Connections table with configurable columns.

@@ -2,7 +2,6 @@ import SwiftUI
 import SwitchboardCore
 import SwitchboardRender
 
-@main
 struct SwitchboardApp: App {
     @State private var model = AppModel()
 
@@ -17,6 +16,7 @@ struct SwitchboardApp: App {
         MenuBarExtra("Switchboard", systemImage: "point.3.connected.trianglepath.dotted") {
             Text("Switchboard \(Switchboard.version)")
             Text(model.statusLine)
+            Button(model.paused ? "Resume" : "Pause") { model.togglePause() }
             Divider()
             Button("Quit Switchboard") { NSApplication.shared.terminate(nil) }
                 .keyboardShortcut("q")

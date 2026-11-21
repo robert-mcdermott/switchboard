@@ -118,13 +118,27 @@ public final class NStatSource: FlowSource, @unchecked Sendable {
     private let clock = MachClock()
     private var lastCounterQuery: EngineTime = -.infinity
 
+    private var interval: Double
+
     /// How often counters are refreshed, in seconds. Sockets opening and closing arrive
     /// as events regardless; this only sets how fresh the byte counts are. Asking the
-    /// kernel to describe every socket is the dominant cost of this source.
-    public let counterInterval: Double
+    /// kernel to describe every socket is the dominant cost of this source, so the app
+    /// raises the rate while its window is in front and lowers it otherwise.
+    public var counterInterval: Double {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return interval
+        }
+        set {
+            lock.lock()
+            interval = max(newValue, 0.1)
+            lock.unlock()
+        }
+    }
 
     public init(counterInterval: Double = 1.0) {
-        self.counterInterval = counterInterval
+        interval = counterInterval
     }
 
     public func start() throws {
@@ -215,6 +229,7 @@ public final class NStatSource: FlowSource, @unchecked Sendable {
         lock.lock()
         let manager = self.manager
         let query = queryAllCounts
+        let counterInterval = interval
         lock.unlock()
         // Ask for fresh counters; they arrive on the queue and are collected next time.
         if let manager, let query, now - lastCounterQuery >= counterInterval - 0.01 {

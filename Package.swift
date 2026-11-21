@@ -73,5 +73,9 @@ let package = Package(
             name: "SwitchboardSourcesTests",
             dependencies: ["SwitchboardSources"]
         ),
+        .testTarget(
+            name: "SwitchboardRenderTests",
+            dependencies: ["SwitchboardRender", "SwitchboardCore"]
+        ),
     ]
 )

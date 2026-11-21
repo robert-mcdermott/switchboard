@@ -2,7 +2,7 @@
 
 A real-time network observatory for macOS. Every connection on the machine, who owns it, where it goes, and how hard it is working — drawn as a living graph that an operator can read at a glance and interrogate in seconds.
 
-**Status:** v0.3 draft, revised after M0 and M1 · **Companions:** [ROADMAP.md](ROADMAP.md) · [M0 findings](spikes/M0-findings.md) · [M1 findings](spikes/M1-findings.md)
+**Status:** v0.4 draft, revised after M0, M1, and M2 · **Companions:** [ROADMAP.md](ROADMAP.md) · [M0 findings](spikes/M0-findings.md) · [M1 findings](spikes/M1-findings.md) · [M2 findings](spikes/M2-findings.md)
 
 ---
 
@@ -84,7 +84,7 @@ M1 settled two of M0's leftovers: a flow's start time from NetworkStatistics is 
 
 | Question | Why it matters | Settled in |
 |---|---|---|
-| Why does NetworkStatistics omit 5–8% of sockets that `netstat` and `nettop` both show? | Standalone completeness. The omitted sockets are ordinary long-lived TLS connections of the user's own apps | M2: try the framework's `…WithOptions` and `SetFlags` calls |
+| Does root see the 5–8% of sockets NetworkStatistics withholds from us? | Standalone cannot: M2 tried every option and flag the framework exports and none revealed them, so `nettop`'s entitlement is the likely gate | M4 |
 | How often does a browser's TLS ClientHello run past its first segment? | Sets the snap length and whether capture must reassemble two segments | M4 |
 | What does unfiltered PKTAP delivery cost under sustained heavy traffic? | The collector's CPU budget | M4 |
 
@@ -363,7 +363,9 @@ An `MTKView` hosted in SwiftUI, drawing to a 16-bit float target.
 5. **Labels** — strings rasterised with CoreText into an LRU atlas, drawn as instanced quads, culled by zoom and priority.
 6. **Post** — bright-pass, dual-filter bloom chain, composite, tone map, optional grain.
 
-Layout runs off the main thread at a fixed timestep (Barnes–Hut, θ ≈ 0.8); the renderer interpolates between the last two layout states. Picking uses the layout's own quadtree, so hover costs microseconds and needs no GPU readback.
+As built in M2 ([M2 findings](spikes/M2-findings.md)): pulses are computed in the edge fragment shader rather than as a separate particle pass, and the final target is 8-bit, with EDR output still to come.
+
+Placement is computed rather than simulated. Every node has an anchor that is a pure function of its name or address: processes are spaced evenly around a ring in an order fixed by their names, and each destination sits in the sector of the process that uses it most. A short relaxation separates overlapping nodes and then stops. This is what makes position stable across launches and makes rendering deterministic for the golden images. Picking is a linear scan, which at a few thousand nodes costs microseconds.
 
 ---
 
@@ -376,7 +378,8 @@ The main window puts the graph in the centre, the inspector on the right, and do
 - **Centre:** this Mac, with interface sub-nodes on demand.
 - **Inner ring:** processes, grouped by user, sized by bytes, badged with icon and trust ring.
 - **Outer field:** remote endpoints, clustered by domain, ASN, country, or subnet. Clusters collapse to a counted node and expand on demand; auto-clustering engages past a configurable node count.
-- **Stable placement:** an endpoint's bearing is seeded from a hash of its cluster key.
+- **Stable placement:** a process's bearing comes from a hash of its name, and an endpoint's from its address within its process's sector.
+- **Loopback** connections count toward their process and its line to the centre but get no node of their own.
 
 Interaction:
 
@@ -443,10 +446,10 @@ Named workspaces save layout, panels, filters, and profile; three ship by defaul
 
 | Area | Budget |
 |---|---|
-| Launch to live graph | ≤ 2 s |
+| Launch to live graph | ≤ 2 s (measured 0.6–0.8 s) |
 | Event to screen | Opens and closes ≤ 300 ms; byte counts ≤ 1 s |
 | Hover to tooltip | ≤ 1 frame |
-| Frame rate | 60 fps floor, 120 fps on ProMotion, at 5,000 nodes and 2,000 active edges |
+| Frame rate | 60 fps floor, 120 fps on ProMotion, at 5,000 nodes and 2,000 active edges. Measured in M2 at 2,051 nodes and 2,050 edges: 110 fps mean, worst frame 25 ms, so the floor is not yet held |
 | Engine CPU | < 1% idle (measured 0.85% with ~150 sockets at the 1 Hz default); < 3% with 2,000 sockets |
 | App CPU | < 10% in Operator profile at typical load |
 | Memory | Collector < 60 MB; app < 400 MB with a 1 h window |

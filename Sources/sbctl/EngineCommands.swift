@@ -90,9 +90,18 @@ enum TopCommand {
 enum DumpCommand {
     static func run(_ options: Options) throws -> Int32 {
         let session = try Session(sourceSpec: options.value("--source") ?? "nstat", flows: options.value("--flows").flatMap(Int.init))
-        try session.start()
-        defer { session.stop() }
-        try session.run(for: options.number("--seconds", default: 1.5))
+        if let at = options.value("--at").flatMap(Double.init) {
+            // Simulated clock: the same answer every time, for comparing against a snapshot.
+            guard session.simulated else {
+                print("--at needs a sim: or trace: source")
+                return 2
+            }
+            SteppedRun.run(sources: session.sources, engine: session.engine, until: at)
+        } else {
+            try session.start()
+            try session.run(for: options.number("--seconds", default: 1.5))
+            session.stop()
+        }
 
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
