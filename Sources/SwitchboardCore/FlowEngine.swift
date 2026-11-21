@@ -36,6 +36,8 @@ public struct EngineSnapshot: Sendable, Codable {
     public var flows: [Flow]
     public var listeners: [Listener]
     public var processes: [ProcessRecord]
+    /// The most recent DNS answers seen, oldest first.
+    public var dns: [DNSRecord] = []
 }
 
 /// Turns socket observations into flows with lifecycle, rates, and attribution.
@@ -94,6 +96,23 @@ public final class FlowEngine {
     private var listenersByKey: [ListenerKey: FlowID] = [:]
     private var listeningPorts: [PortKey: Int] = [:]
     private var nextID: FlowID = 1
+
+    // Learned from packets.
+    private struct Asker: Hashable {
+        var pid: Int32
+        var address: IPAddress
+    }
+
+    private var namesByAddress: [IPAddress: (name: String, source: NameSource)] = [:]
+    private var namesByAsker: [Asker: String] = [:]
+    /// Keyed both ways round, since a packet does not say which end is ours.
+    private var serverNames: [FlowKey: String] = [:]
+    private var observedServices: [FlowKey: String] = [:]
+    public private(set) var dnsLog: [DNSRecord] = []
+    private var nextDNSRecord: UInt64 = 1
+    /// Each table is emptied when it reaches this size. Crude, but it cannot grow without limit.
+    private static let nameTableLimit = 20_000
+    private static let dnsLogLimit = 200
     private var startedAt: EngineTime?
     private var openedThisTick = Set<FlowID>()
 
@@ -219,6 +238,8 @@ public final class FlowEngine {
             service = named
             basis = .port
         }
+        if let seen = observedServices[flowKey] { (service, basis) = Self.merge(observed: seen, with: service) }
+        let named = name(for: flowKey, pid: observation.pid)
 
         // A connection we watched open is active by nature. One that predates us is
         // idle until its counters prove otherwise.
@@ -233,7 +254,8 @@ public final class FlowEngine {
             bytesIn: observation.rxBytes, bytesOut: observation.txBytes,
             packetsIn: observation.rxPackets, packetsOut: observation.txPackets, rateIn: 0, rateOut: 0,
             rttMS: observation.rttMS, retransmittedBytes: observation.retransmittedBytes,
-            service: service, serviceBasis: basis, hostname: nil, attribution: sourceKey.source)
+            service: service, serviceBasis: basis, hostname: named?.name, hostnameSource: named?.source,
+            attribution: sourceKey.source)
         if flow.tcpState?.isClosing == true { flow.state = .closing }
 
         var meter = Meters()
@@ -335,6 +357,82 @@ public final class FlowEngine {
             pid: observation.pid, name: observation.processName, uniqueID: observation.uniquePID)
     }
 
+    // MARK: - Names and services from packets
+
+    /// Applies what packet capture learned: hostnames from DNS and TLS, and what the
+    /// traffic on a connection was seen to be.
+    public func observe(_ observations: [CaptureObservation], at now: EngineTime) {
+        for observation in observations {
+            switch observation {
+            case .resolved(let name, let addresses, let pid):
+                guard !name.isEmpty, !addresses.isEmpty else { continue }
+                if namesByAddress.count >= Self.nameTableLimit { namesByAddress.removeAll() }
+                if namesByAsker.count >= Self.nameTableLimit { namesByAsker.removeAll() }
+                for address in addresses {
+                    // A name from a TLS handshake is specific to its connection; a DNS
+                    // answer is the better general name for the address.
+                    namesByAddress[address] = (name, .dns)
+                    if let pid { namesByAsker[Asker(pid: pid, address: address)] = name }
+                }
+                dnsLog.append(DNSRecord(id: nextDNSRecord, time: now, name: name, addresses: addresses, pid: pid))
+                nextDNSRecord += 1
+                if dnsLog.count > Self.dnsLogLimit { dnsLog.removeFirst(dnsLog.count - Self.dnsLogLimit) }
+                // Connections already open to these addresses, and not yet named, take the name.
+                let resolved = Set(addresses)
+                for (id, flow) in flows where flow.hostnameSource != .sni && resolved.contains(flow.key.remote.address) {
+                    if pid == nil || pid == flow.pid || flow.hostname == nil {
+                        flows[id]?.hostname = name
+                        flows[id]?.hostnameSource = .dns
+                    }
+                }
+
+            case .serverName(let proto, let from, let to, let name):
+                guard !name.isEmpty else { continue }
+                if serverNames.count >= Self.nameTableLimit { serverNames.removeAll() }
+                let forward = FlowKey(proto: proto, local: from, remote: to)
+                let backward = FlowKey(proto: proto, local: to, remote: from)
+                serverNames[forward] = name
+                serverNames[backward] = name
+                for (id, flow) in flows where flow.key == forward || flow.key == backward {
+                    flows[id]?.hostname = name
+                    flows[id]?.hostnameSource = .sni
+                    // With nothing better known, the name also stands for the address.
+                    if namesByAddress[flow.key.remote.address] == nil {
+                        namesByAddress[flow.key.remote.address] = (name, .sni)
+                    }
+                }
+
+            case .service(let proto, let from, let to, let service):
+                if observedServices.count >= Self.nameTableLimit { observedServices.removeAll() }
+                let forward = FlowKey(proto: proto, local: from, remote: to)
+                let backward = FlowKey(proto: proto, local: to, remote: from)
+                observedServices[forward] = service
+                observedServices[backward] = service
+                for (id, flow) in flows where flow.key == forward || flow.key == backward {
+                    let merged = Self.merge(observed: service, with: flow.service)
+                    flows[id]?.service = merged.0
+                    flows[id]?.serviceBasis = merged.1
+                }
+            }
+        }
+    }
+
+    /// The best name for a connection: its own TLS server name, then what this process
+    /// was told by DNS, then what anyone was told.
+    private func name(for key: FlowKey, pid: Int32) -> (name: String, source: NameSource)? {
+        if let name = serverNames[key] { return (name, .sni) }
+        if let name = namesByAsker[Asker(pid: pid, address: key.remote.address)] { return (name, .dns) }
+        return namesByAddress[key.remote.address]
+    }
+
+    /// Seeing TLS on a connection confirms a port-based guess such as HTTPS without
+    /// replacing its more specific name; anything else observed replaces a guess.
+    private static func merge(observed: String, with current: String?) -> (String?, ServiceBasis?) {
+        let overTLS: Set<String> = ["HTTPS", "HTTPS-alt", "IMAPS", "SMTPS", "POP3S", "LDAPS", "MQTT-TLS", "APNs", "FCM", "DNS-over-TLS"]
+        if observed == "TLS", let current, overTLS.contains(current) { return (current, .observed) }
+        return (observed, .observed)
+    }
+
     // MARK: - Lifecycle
 
     private func sweep(delta: inout EngineDelta, touched: inout Set<FlowID>, previouslyNew: Set<FlowID>) {
@@ -379,6 +477,7 @@ public final class FlowEngine {
             wallClock: wallClockOrigin + now,
             flows: flows.values.sorted { $0.id < $1.id },
             listeners: listeners.values.sorted { $0.id < $1.id },
-            processes: processes.values.sorted { $0.pid < $1.pid })
+            processes: processes.values.sorted { $0.pid < $1.pid },
+            dns: dnsLog)
     }
 }

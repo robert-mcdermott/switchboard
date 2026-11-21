@@ -12,6 +12,7 @@ public enum SteppedRun {
             let time = Double(tick) * step
             for source in sources {
                 engine.ingest(source.poll(now: time), from: source.name, at: time)
+                if let capture = source as? CaptureProvider { engine.observe(capture.pollCapture(now: time), at: time) }
             }
             each(time)
             tick += 1

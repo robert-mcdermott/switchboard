@@ -135,6 +135,8 @@ final class LiveFeed: @unchecked Sendable {
 
             for source in sources {
                 engine.ingest(source.poll(now: now), from: source.name, at: now)
+                // Hostnames and observed services, where a source can supply them.
+                if let capture = source as? CaptureProvider { engine.observe(capture.pollCapture(now: now), at: now) }
             }
             let snapshot = engine.snapshot()
             controller.update(snapshot, time: clock())
@@ -151,7 +153,9 @@ final class LiveFeed: @unchecked Sendable {
                 summary.listeners = engine.listeners.count
                 summary.exposed = engine.listeners.values.count { $0.exposed }
                 summary.processes = engine.processes.count
-                summary.sources = sources.map { "\($0.name): \($0.health.detail)" } + failures
+                // In Full mode the collector describes all of its sources, including packet capture.
+                let reported = collector?.health ?? []
+                summary.sources = (reported.isEmpty ? sources.map { "\($0.name): \($0.health.detail)" } : reported) + failures
                 // In Full mode a source the collector could not run is reported, not treated as a fault here.
                 summary.healthy = failures.isEmpty && (collector != nil || sources.allSatisfy { $0.health.running })
                 if let collector {

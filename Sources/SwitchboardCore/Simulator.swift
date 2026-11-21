@@ -3,7 +3,7 @@ import Foundation
 /// Synthetic traffic, for development, demos, benchmarks, and tests that must not depend
 /// on what the machine happens to be doing. Deterministic for a given scenario and seed
 /// when polled at the same times.
-public final class SimulatorSource: FlowSource, @unchecked Sendable {
+public final class SimulatorSource: FlowSource, CaptureProvider, @unchecked Sendable {
     public enum Scenario: String, CaseIterable, Sendable {
         /// A few apps, a couple of dozen connections.
         case quiet
@@ -60,6 +60,27 @@ public final class SimulatorSource: FlowSource, @unchecked Sendable {
     private var lastPoll: Double?
     private var running = false
     private let localV4 = IPAddress.v4(0x0A00_0024)  // 10.0.0.36
+    private var pendingCapture: [CaptureObservation] = []
+    private var named = Set<IPAddress>()
+
+    /// What packet capture would have learned about the simulated traffic.
+    public func pollCapture(now: EngineTime) -> [CaptureObservation] {
+        lock.lock()
+        defer { lock.unlock() }
+        let drained = pendingCapture
+        pendingCapture.removeAll(keepingCapacity: true)
+        return drained
+    }
+
+    /// An invented name for an address, always the same one, under domains reserved for examples.
+    static func hostname(for address: IPAddress) -> String {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in address.networkBytes { hash = (hash ^ UInt64(byte)) &* 0x100_0000_01b3 }
+        hash ^= hash >> 29
+        let hosts = ["api", "cdn", "edge", "static", "media", "auth", "sync", "push", "img", "telemetry"]
+        let domains = ["example.com", "example.net", "example.org", "cloud.example", "video.example", "mail.example"]
+        return "\(hosts[Int(hash % 10)])-\((hash >> 8) % 90 + 10).\(domains[Int((hash >> 20) % 6)])"
+    }
 
     public init(scenario: Scenario, seed: UInt64 = 0x5B17_C0DE, flows: Int? = nil) {
         self.scenario = scenario
@@ -230,6 +251,21 @@ public final class SimulatorSource: FlowSource, @unchecked Sendable {
         allocate(
             observation, rx: spec.rate * scale, tx: spec.rate * scale * 0.12,
             diesAt: now + max(lifetime - age, 0.2), openedAt: now - age)
+
+        // A port scan resolves nothing and completes no handshakes.
+        if case .scan = spec.behaviour { return }
+        let name = Self.hostname(for: peer)
+        if named.insert(peer).inserted {
+            pendingCapture.append(.resolved(name: name, addresses: [peer], pid: spec.pid))
+        }
+        if service.port == 443 {
+            if service.proto == .tcp {
+                pendingCapture.append(.serverName(proto: .tcp, from: observation.local, to: observation.remote, name: name))
+                pendingCapture.append(.service(proto: .tcp, from: observation.local, to: observation.remote, service: "TLS"))
+            } else {
+                pendingCapture.append(.service(proto: .udp, from: observation.local, to: observation.remote, service: "QUIC"))
+            }
+        }
     }
 
     private static func makeSpecs(_ scenario: Scenario, flows: Int?, random: inout SplitMix64) -> [ProcessSpec] {

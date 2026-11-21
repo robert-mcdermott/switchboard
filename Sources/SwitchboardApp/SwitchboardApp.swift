@@ -42,6 +42,7 @@ struct SettingsView: View {
     @AppStorage("palette") private var palette = "standard"
     @AppStorage("historyMinutes") private var historyMinutes = 15.0
     @AppStorage("profile") private var profile = "cinema"
+    @AppStorage("hostnames") private var hostnames = "passive"
 
     var body: some View {
         Form {
@@ -56,6 +57,15 @@ struct SettingsView: View {
                     Text("Colour-safe").tag("colorSafe")
                 }
                 Text("Colour-safe uses hues that stay distinct with the common colour-vision deficiencies.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section("Hostnames") {
+                Picker("Label destinations with", selection: $hostnames) {
+                    Text("Hostnames where known").tag("passive")
+                    Text("Addresses only").tag("off")
+                }
+                Text("Names come from DNS answers and TLS handshakes the collector sees. Switchboard makes no lookups of its own.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

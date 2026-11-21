@@ -1,6 +1,8 @@
-# M4 findings — part one
+# M4 findings
 
-The collector and Full mode. Part one is the privileged daemon, the protocol it speaks, and the app following it automatically. Part two is packet capture and hostnames.
+The collector and Full mode, in two parts. Part one is the privileged daemon, the protocol it speaks, and the app following it automatically. Part two is packet capture: hostnames and observed services.
+
+![Hostnames on simulated traffic, with the DNS panel open](m4-hostnames.jpg)
 
 Measured on macOS 27.2.1 (26B131), Apple M4. The automated checks below ran with the collector unprivileged on a temporary socket. **The root run was done by the owner on 2026-11-21:** installed with `sudo scripts/install.sh`, used the app in Full mode and saw processes from every account, then removed it with `sudo scripts/uninstall.sh`. That confirms the install path and Full mode work end to end; the specific measurements in "What still needs measuring as root" were not taken.
 
@@ -24,8 +26,14 @@ sudo scripts/uninstall.sh
 | `scripts/install.sh` and `uninstall.sh` | Done; run by the owner |
 | The install command offered in the app | Done, in the Health panel, with a Copy button |
 | Collector section in Health | Mode, what it means, and each collector source's status |
-| Packet capture: DNS answers, TLS server names, short-flow attribution | Part two |
-| Hostname modes, source badges, DNS Activity panel, observed service labels | Part two |
+| Packet capture with filtering in our own code | Built; **not yet run as root** |
+| DNS answers, with the process that asked | Built and tested on synthetic packets |
+| TLS server names, including handshakes that span segments | Built and tested on synthetic packets |
+| Observed service labels: TLS, QUIC, DNS | Built |
+| Hostname modes Off and Passive; source shown with each name | Done |
+| DNS Activity panel | Done |
+| Attribution of very short flows from SYN and FIN packets | Not built (see below) |
+| Clustering by domain | Not built |
 
 ## Verification
 
@@ -47,16 +55,50 @@ sudo scripts/uninstall.sh
 | The app with no collector | Standalone, as before |
 | Unit tests | 104 passing |
 
-## What still needs measuring as root
+## Part two: what was verified, and how
 
-The owner's run showed the service installs, the app switches to Full mode, and other accounts' processes appear. These were not measured during it:
+Capture needs root, so none of it could be run here. Three things stand in for that:
 
-| Question | How to answer it |
+- **The packet layout is known to be right.** The M0 probe, run as root on this machine, found the PKTAP header at exactly the length declared, and read DNS answers and TLS names from live packets with the same parsers.
+- **The inspector is tested on synthetic packets** built in that verified layout: Ethernet, loopback, and raw link types; IPv4 and IPv6; DNS answers with and without a delegating process; TLS hellos in one segment and split across two, three, and five; QUIC detected once per connection; interleaved connections kept apart; fragments, plain data, and unrecognised headers dismissed; every truncation and three thousand packets of noise survived.
+- **The simulator invents hostnames,** so everything downstream of capture runs here: names through the engine, across the collector's socket to a client that connects after the lookups happened, and into the graph, the table, and the DNS panel.
+
+| Check | Result |
 |---|---|
-| Does root NetworkStatistics plus the kernel socket list reach 100% of `netstat`? | `scripts/verify.sh` with the collector installed, once `sbctl verify` can take the collector as its source |
+| Unit tests | 124 passing, 20 of them new for this part |
+| Names through the collector | A client connecting after every lookup still names all of its connections |
+| The running window | 103 DNS rows, hostnames as graph labels and in the table |
+| Unprivileged daemon | Starts without capture and says so: "packet capture unavailable: needs root" |
+
+## What still needs a root run
+
+```bash
+sudo scripts/install.sh
+```
+
+then open the app, and
+
+```bash
+.build/release/sbctl tap --seconds 10
+```
+
+| Question | Where the answer shows |
+|---|---|
+| Does live capture start, and are DNS answers and TLS names read? | The `capture:` line in `sbctl tap` and in the Health panel counts packets, DNS answers, and TLS names |
+| How many TLS names needed more than one segment? | The same line: "(N across segments)". This is the M0 question about browser handshakes |
+| What does inspecting every packet cost? | CPU of `switchboardd` in Activity Monitor during a large download |
+| Are any packets dropped? | The same line reports drops |
+| Do most HTTPS connections carry a hostname? | The Host column of the Connections table |
+| Does root NetworkStatistics plus the kernel socket list reach 100% of `netstat`? | Not yet measurable from a script |
 | Is a non-administrator refused? | Connect from a standard account |
-| Does `uninstall.sh` leave nothing behind? | Check the four paths it removes |
-| The burst test: 500 connections each under 100 ms, 99% attributed | Depends on capture, in part two |
+
+## Not built
+
+**Attribution of very short flows from packets.** The roadmap had capture attribute connections too brief for polling, by watching SYN and FIN. M1 then measured NetworkStatistics catching 30 of 30 connections lasting 10 to 100 ms, because it reports opens as events. Building a second, packet-derived flow source to cover a gap that measurement did not find would add a lot of code to the root process for no shown benefit. If the root run above, or the burst test, shows connections being missed, this is the fix.
+
+**Clustering by domain.** Hostnames now exist; grouping destinations by registered domain is not done.
+
+**Active reverse lookups** remain in M6, so Standalone mode shows addresses only.
 
 ## Design decisions
 
@@ -76,11 +118,21 @@ The cost is that two clients each run their own engine. For a single-user deskto
 
 **Switching modes restarts the engine, not the picture.** Flows are identified by the source that reported them, so they cannot be carried from local sources to the collector's. The engine starts afresh and refills within a second; the graph keeps every node where it was, because placement depends only on names and addresses.
 
+**Capture reports; the engine decides.** The inspector says what a packet showed: this name resolved to these addresses for this process; this server name was sent between these two endpoints. It does not say which endpoint is ours, because a packet does not know. The engine, which knows the sockets, matches either way round.
+
+**A name carries its source.** A hostname from a TLS handshake belongs to that one connection and wins over DNS for it. A DNS answer names an address for the process that asked, and, failing that, for anyone. The table and tooltips show which it was: "from DNS" or "from TLS".
+
+**Seeing TLS confirms a guess without renaming it.** A connection to port 443 is labelled HTTPS by port. Once a TLS handshake is seen on it, it is still HTTPS, now marked "seen" instead of "by port". TLS on a port with no name of its own is labelled TLS.
+
+**The collector replays recent names.** A client that connects after a lookup would otherwise never learn the name, so the collector keeps the last 4,000 capture observations and sends them with the initial state.
+
+**Unknown message types are skipped.** Capture added a message type. A client now steps over types it does not know, so the collector can gain messages without breaking an older app.
+
 **The kernel socket list reports received bytes as zero.** M1 found its receive counter runs at about twice the true figure. A connection known only from that list shows what it sent and no figure for what it received, rather than a wrong one. Where NetworkStatistics also reports the connection, its numbers are used.
 
 ## The protocol
 
-A frame is a four-byte length, a type byte, and a payload. Integers are variable-length; strings carry their length. Seven message types: hello, welcome, refused, events, process, health, reset. The whole codec is one file with no dependencies, [`Wire.swift`](../../Sources/SwitchboardCore/Wire.swift).
+A frame is a four-byte length, a type byte, and a payload. Integers are variable-length; strings carry their length. Eight message types: hello, welcome, refused, events, process, health, reset, capture. The whole codec is one file with no dependencies, [`Wire.swift`](../../Sources/SwitchboardCore/Wire.swift).
 
 ```bash
 sbctl tap --json

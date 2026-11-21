@@ -222,7 +222,7 @@ Port table first (IANA plus a curated list), upgraded by observation in Full mod
 | Passive (default in Full) | DNS answers and TLS SNI seen in capture | none |
 | Active | Passive plus `getnameinfo`, cached, rate-limited | Emits PTR queries; the toggle says so |
 
-Standalone mode has no passive source, so its default is Off with a one-click prompt to enable Active. Each hostname shows its source badge (`DNS`, `SNI`, `PTR`). SNI is read from TCP TLS only in v1; QUIC flows get names through DNS correlation. The UI states plainly when encrypted DNS, ECH, or Private Relay is limiting what can be seen.
+As built in M4, a name from a TLS handshake belongs to its one connection and wins over DNS for it; a DNS answer names an address for the process that asked and, failing that, for anyone. Standalone mode has no passive source and Active lookups arrive in M6, so until then it shows addresses. Each hostname shows its source badge (`DNS`, `SNI`, `PTR`). SNI is read from TCP TLS only in v1; QUIC flows get names through DNS correlation. The UI states plainly when encrypted DNS, ECH, or Private Relay is limiting what can be seen.
 
 ### 6.7 Capture discipline (Full mode)
 

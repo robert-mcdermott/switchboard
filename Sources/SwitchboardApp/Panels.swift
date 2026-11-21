@@ -43,6 +43,7 @@ struct BottomPanel: View {
                     }
                 case .interfaces:
                     RankingList(title: "By network interface", talkers: model.interfaces, color: .signal)
+                case .dns: DNSPanel(model: model)
                 case .listeners: ListenersPanel(model: model)
                 case .health: HealthPanel(model: model)
                 }
@@ -103,6 +104,11 @@ struct ConnectionsPanel: View {
             .width(44).customizationID("proto")
         TableColumn("Remote", value: \.remote) { (row: ConnectionRow) in Text(row.remote) }
             .customizationID("remote")
+        TableColumn("Host", value: \.host) { (row: ConnectionRow) in
+            // The badge says where the name came from: a DNS answer or a TLS handshake.
+            Text(row.host.isEmpty ? "–" : "\(row.host)  \(row.hostSource)").foregroundStyle(row.host.isEmpty ? Color.dim : Color.readout)
+        }
+        .customizationID("host")
         TableColumn("Port", value: \.remotePort) { (row: ConnectionRow) in Text(String(row.remotePort)) }
             .width(52).customizationID("port")
         TableColumn("Service", value: \.service) { (row: ConnectionRow) in Text(row.service) }
@@ -230,6 +236,38 @@ struct ThroughputPanel: View {
             }
         }
         .padding(12)
+    }
+}
+
+struct DNSPanel: View {
+    @Bindable var model: AppModel
+
+    var body: some View {
+        if model.dns.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("No DNS answers seen").font(.mono(12)).foregroundStyle(Color.readout)
+                Text(model.fullMode
+                    ? "Lookups appear here as they happen. Apps that use encrypted DNS, such as most browsers, do not show up: their lookups cannot be read."
+                    : "Reading DNS answers needs the collector, which captures packets as root. See the Health panel.")
+                    .font(.mono(11))
+                    .foregroundStyle(Color.dim)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        } else {
+            Table(model.dns) {
+                TableColumn("Time") { Text($0.time.formatted(date: .omitted, time: .standard)) }.width(90)
+                TableColumn("Name") { Text($0.name) }
+                TableColumn("Resolved to") { Text($0.addresses) }
+                TableColumn("Asked by") { Text($0.askedBy) }.width(180)
+                TableColumn("Connections") { row in
+                    Text(row.connections == 0 ? "–" : "\(row.connections)").foregroundStyle(row.connections == 0 ? Color.dim : Color.signal)
+                }
+                .width(90)
+            }
+            .font(.mono(11))
+            .scrollContentBackground(.hidden)
+        }
     }
 }
 

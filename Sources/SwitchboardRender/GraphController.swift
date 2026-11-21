@@ -136,11 +136,16 @@ public final class GraphController: @unchecked Sendable {
         /// 1 while any flow is open, falling to 0 as the last closed flow fades.
         var life = 0.0
         var services: [String: Int] = [:]
+        /// Hostnames seen on these flows, how many flows carry each, and where each came from.
+        var names: [String: Int] = [:]
+        var nameSources: [String: NameSource] = [:]
         var flows: [Flow] = []
 
         var rate: Double { rateIn + rateOut }
         var bytes: UInt64 { bytesIn &+ bytesOut }
         var service: String? { services.max { ($0.value, $1.key) < ($1.value, $0.key) }?.key }
+        /// The name most of these flows go by.
+        var name: String? { names.max { ($0.value, $1.key) < ($1.value, $0.key) }?.key }
 
         mutating func add(_ flow: Flow, life flowLife: Double) {
             rateIn += flow.rateIn
@@ -151,6 +156,10 @@ public final class GraphController: @unchecked Sendable {
             if flow.state != .closed { open += 1 }
             life = max(life, flowLife)
             if let service = flow.service { services[service, default: 0] += 1 }
+            if let name = flow.hostname {
+                names[name, default: 0] += 1
+                nameSources[name] = flow.hostnameSource
+            }
             flows.append(flow)
         }
 
@@ -163,6 +172,8 @@ public final class GraphController: @unchecked Sendable {
             total += other.total
             life = max(life, other.life)
             services.merge(other.services, uniquingKeysWith: +)
+            names.merge(other.names, uniquingKeysWith: +)
+            nameSources.merge(other.nameSources) { first, _ in first }
             flows.append(contentsOf: other.flows)
         }
     }
@@ -200,6 +211,7 @@ public final class GraphController: @unchecked Sendable {
     private var expanded = Set<NodeID>()
     private var scheme = PaletteScheme.standard
     private var keepEnded = false
+    private var showNames = true
     /// Connections that have ended, remembered while `keepsEnded` is on.
     private var ended: [FlowID: (flow: Flow, process: ProcessRecord?)] = [:]
 
@@ -269,6 +281,13 @@ public final class GraphController: @unchecked Sendable {
                 if !newValue { ended.removeAll() }
             }
         }
+    }
+
+    /// Whether destinations are labelled with hostnames where they are known, or always
+    /// with addresses.
+    public var showsHostnames: Bool {
+        get { lock.withLock { showNames } }
+        set { change { showNames = newValue } }
     }
 
     /// How many ended connections are being kept on screen.
@@ -354,6 +373,7 @@ public final class GraphController: @unchecked Sendable {
         let scheme = self.scheme
         var arrivals = self.arrivals
         let keepEnded = self.keepEnded
+        let showNames = self.showNames
         var ended = self.ended
         let previous = Dictionary(uniqueKeysWithValues: nodes.map { ($0.id, $0) })
         lock.unlock()
@@ -534,7 +554,9 @@ public final class GraphController: @unchecked Sendable {
                 radius: 2.6 + 6 * Self.level(Double(aggregate.bytes), scale: 9) + (size > 1 ? 2 + min(4, log2(Float(size))) : 0),
                 color: color,
                 intensity: (0.3 + 0.7 * Self.level(aggregate.rate, scale: 6.5)) * Float(max(aggregate.life, 0.15)),
-                bornAt: born(id), label: size > 1 ? "\(text) ×\(size)" : text,
+                // Placement is seeded from the address, so naming a node never moves it.
+                bornAt: born(id),
+                label: size > 1 ? "\(text) ×\(size)" : (showNames ? aggregate.name.map { Self.clip($0, to: 36) } : nil) ?? text,
                 priority: aggregate.rate + Double(aggregate.bytes) * 1e-9)
             // A ring marks a node that stands for several addresses.
             if size > 1 { node.ring = SIMD4(color, 0.55) }
@@ -917,7 +939,11 @@ public final class GraphController: @unchecked Sendable {
             let users = Set(aggregate.flows.map(\.pid)).sorted().map(name)
             var rows = trafficRows(aggregate)
             rows.insert(.init(label: "Used by", value: Self.list(users)), at: 0)
-            return HoverInfo(title: address.description, subtitle: Self.classification(address), rows: rows, footnote: nil)
+            rows.insert(contentsOf: nameRows(aggregate), at: 0)
+            return HoverInfo(
+                title: aggregate.name ?? address.description,
+                subtitle: aggregate.name == nil ? Self.classification(address) : "\(address) · \(Self.classification(address))",
+                rows: rows, footnote: nil)
 
         case .node(.network(let address, let bits)):
             let addresses = networkMembers[.network(address, bits: bits)] ?? []
@@ -925,6 +951,7 @@ public final class GraphController: @unchecked Sendable {
             var rows = trafficRows(aggregate)
             rows.insert(.init(label: "Used by", value: Self.list(users)), at: 0)
             rows.insert(.init(label: "Addresses", value: Self.list(addresses.map(\.description), limit: 3)), at: 1)
+            rows.insert(contentsOf: nameRows(aggregate), at: 2)
             return HoverInfo(
                 title: "\(address)/\(bits)", subtitle: "\(addresses.count) addresses in one network · \(Self.classification(address))",
                 rows: rows, footnote: "Right-click to expand into separate addresses")
@@ -954,12 +981,13 @@ public final class GraphController: @unchecked Sendable {
                 far = "\(address)/\(bits)"
                 kind = Self.classification(address)
             case .endpoint(let address):
-                far = address.description
-                kind = Self.classification(address)
+                far = aggregate.name ?? address.description
+                kind = aggregate.name == nil ? Self.classification(address) : "\(address) · \(Self.classification(address))"
             default:
                 far = "?"
                 kind = ""
             }
+            rows.insert(contentsOf: nameRows(aggregate), at: 0)
             return HoverInfo(title: "\(name(pid)) → \(far)", subtitle: "pid \(pid) · \(kind)", rows: rows, footnote: nil)
 
         default:
@@ -988,6 +1016,24 @@ public final class GraphController: @unchecked Sendable {
             footnote: record?.restricted == true ? "Some details need the collector" : nil)
     }
 
+    /// Hostnames, each with where it came from: a name is a claim, and its source is how far to trust it.
+    private func nameRows(_ aggregate: Aggregate) -> [HoverInfo.Row] {
+        guard !aggregate.names.isEmpty else { return [] }
+        let ordered = aggregate.names.sorted { ($0.value, $1.key) > ($1.value, $0.key) }.map { name, _ in
+            "\(name) (\(Self.sourceLabel(aggregate.nameSources[name])))"
+        }
+        return [.init(label: ordered.count == 1 ? "Hostname" : "Hostnames", value: Self.list(ordered, limit: 3))]
+    }
+
+    private static func sourceLabel(_ source: NameSource?) -> String {
+        switch source {
+        case .dns: "from DNS"
+        case .sni: "from TLS"
+        case .ptr: "reverse lookup"
+        case nil: "source unknown"
+        }
+    }
+
     private func trafficRows(_ aggregate: Aggregate) -> [HoverInfo.Row] {
         var rows: [HoverInfo.Row] = [
             .init(label: "Connections", value: aggregate.open == aggregate.total ? "\(aggregate.open)" : "\(aggregate.open) open, \(aggregate.total - aggregate.open) ended"),
@@ -998,7 +1044,14 @@ public final class GraphController: @unchecked Sendable {
             if let service = flow.service, let basis = flow.serviceBasis { result[service] = basis }
         }
         if !services.isEmpty {
-            let text = services.keys.sorted().map { "\($0) (by \(services[$0]!.rawValue))" }
+            // How the label was arrived at: assumed from the port, inferred, or seen on the wire.
+            let text = services.keys.sorted().map { name -> String in
+                switch services[name]! {
+                case .port: "\(name) (by port)"
+                case .heuristic: "\(name) (inferred)"
+                case .observed: "\(name) (seen)"
+                }
+            }
             rows.append(.init(label: "Service", value: Self.list(text)))
         }
         if let oldest = aggregate.flows.filter({ $0.state != .closed }).min(by: { $0.firstSeen < $1.firstSeen }) {

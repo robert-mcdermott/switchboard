@@ -89,7 +89,7 @@ struct ConnectionSummary: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
-            Text("\(row.proto) \(row.remote):\(row.remotePort)  \(row.service)")
+            Text("\(row.proto) \(row.host.isEmpty ? row.remote : row.host):\(row.remotePort)  \(row.service)")
                 .foregroundStyle(Color.readout)
                 .lineLimit(1)
                 .truncationMode(.middle)

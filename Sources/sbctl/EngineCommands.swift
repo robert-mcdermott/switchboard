@@ -62,7 +62,7 @@ enum TopCommand {
             let age = (flow.ageExact ? "" : "≥") + ByteFormat.duration(flow.age(at: engine.now))
             lines.append(row([
                 process?.name ?? "?", "\(flow.pid)", process?.username ?? "-", flow.key.proto.rawValue,
-                flow.key.remote.description, flow.service ?? "-", flow.state.rawValue, age,
+                flow.hostname.map { "\($0):\(flow.key.remote.port)" } ?? flow.key.remote.description, flow.service ?? "-", flow.state.rawValue, age,
                 ByteFormat.rate(flow.rateIn), ByteFormat.rate(flow.rateOut),
                 ByteFormat.bytes(Double(flow.bytesIn)), ByteFormat.bytes(Double(flow.bytesOut)),
                 flow.rttMS.map { String(format: "%.0f ms", $0) } ?? "-",

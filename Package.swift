@@ -71,7 +71,7 @@ let package = Package(
         ),
         .testTarget(
             name: "SwitchboardSourcesTests",
-            dependencies: ["SwitchboardSources"]
+            dependencies: ["SwitchboardSources", "SwitchboardCore", "CDarwinPrivate"]
         ),
         .testTarget(
             name: "SwitchboardRenderTests",

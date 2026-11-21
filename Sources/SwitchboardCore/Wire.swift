@@ -45,6 +45,11 @@ public enum Wire {
         /// The complete current state follows. Sent on connecting, and again if the client
         /// fell so far behind that its backlog was dropped.
         case reset
+        /// What packet capture learned: hostnames and observed services.
+        case capture([CaptureObservation])
+        /// A message type this build does not know. Skipped, so a newer collector can add
+        /// messages without breaking an older client.
+        case unknown(type: UInt8)
     }
 
     // MARK: - Framing
@@ -82,6 +87,12 @@ public enum Wire {
             writer.varint(UInt64(resyncs))
         case .reset:
             writer.byte(7)
+        case .capture(let observations):
+            writer.byte(8)
+            writer.varint(UInt64(observations.count))
+            observations.forEach { writer.capture($0) }
+        case .unknown(let type):
+            writer.byte(type)
         }
         let body = writer.bytes
         var framed: [UInt8] = []
@@ -125,8 +136,15 @@ public enum Wire {
             message = .health(sources: sources, resyncs: try reader.uint32())
         case 7:
             message = .reset
+        case 8:
+            let count = try reader.count(minimumBytesEach: 3)
+            var observations: [CaptureObservation] = []
+            observations.reserveCapacity(count)
+            for _ in 0..<count { observations.append(try reader.capture()) }
+            message = .capture(observations)
         case let other:
-            throw .malformed("unknown message type \(other)")
+            // Framing has already delimited it, so it can be stepped over safely.
+            return .unknown(type: other)
         }
         guard reader.isAtEnd else { throw .malformed("\(reader.remaining) bytes left over") }
         return message
@@ -237,6 +255,30 @@ public enum Wire {
                 if let value = observation.retransmittedBytes { varint(value) }
                 if let value = observation.ageSeconds { double(value) }
                 if let value = observation.serviceHint { string(value) }
+            }
+        }
+
+        mutating func capture(_ observation: CaptureObservation) {
+            switch observation {
+            case .resolved(let name, let addresses, let pid):
+                byte(0)
+                string(name)
+                varint(UInt64(addresses.count))
+                addresses.forEach { address($0) }
+                byte(pid == nil ? 0 : 1)
+                if let pid { signed(pid) }
+            case .serverName(let proto, let from, let to, let name):
+                byte(1)
+                byte(proto == .tcp ? 6 : 17)
+                endpoint(from)
+                endpoint(to)
+                string(name)
+            case .service(let proto, let from, let to, let service):
+                byte(2)
+                byte(proto == .tcp ? 6 : 17)
+                endpoint(from)
+                endpoint(to)
+                string(service)
             }
         }
 
@@ -377,6 +419,37 @@ public enum Wire {
                 return .seen(observation)
             case let other:
                 throw .malformed("event kind \(other)")
+            }
+        }
+
+        mutating func transport() throws(WireError) -> TransportProtocol {
+            switch try byte() {
+            case 6: return .tcp
+            case 17: return .udp
+            case let other: throw .malformed("protocol \(other)")
+            }
+        }
+
+        mutating func capture() throws(WireError) -> CaptureObservation {
+            switch try byte() {
+            case 0:
+                let name = try string()
+                let count = try count(minimumBytesEach: 5)
+                var addresses: [IPAddress] = []
+                for _ in 0..<count { addresses.append(try address()) }
+                let pid: Int32?
+                switch try byte() {
+                case 0: pid = nil
+                case 1: pid = try signed()
+                case let other: throw .malformed("presence flag \(other)")
+                }
+                return .resolved(name: name, addresses: addresses, pid: pid)
+            case 1:
+                return .serverName(proto: try transport(), from: try endpoint(), to: try endpoint(), name: try string())
+            case 2:
+                return .service(proto: try transport(), from: try endpoint(), to: try endpoint(), service: try string())
+            case let other:
+                throw .malformed("capture kind \(other)")
             }
         }
 

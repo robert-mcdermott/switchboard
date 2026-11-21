@@ -36,6 +36,17 @@ import Testing
             parentPID: 1, uid: 501, username: "robert", startTime: 1_795_000_000.25, signing: .developerID, restricted: true)),
         .health(sources: ["nstat: 250 sockets tracked", "kernel: 267 sockets"], resyncs: 3),
         .reset,
+        .capture([]),
+        .capture([
+            .resolved(name: "api.example.com", addresses: [IPAddress("93.184.216.34")!, IPAddress("2606:2800:220:1::1")!], pid: 6526),
+            .resolved(name: "", addresses: [], pid: nil),
+            .serverName(
+                proto: .tcp, from: Endpoint(address: IPAddress("10.0.0.36")!, port: 52_551),
+                to: Endpoint(address: IPAddress("93.184.216.34")!, port: 443), name: "api.example.com"),
+            .service(
+                proto: .udp, from: Endpoint(address: IPAddress("2601:602::24")!, port: 50_566),
+                to: Endpoint(address: IPAddress("2607:f8b0::200e")!, port: 443), service: "QUIC"),
+        ]),
     ]
 
     static func body(_ message: Wire.Message) -> [UInt8] { Array(Wire.frame(message).dropFirst(4)) }
@@ -93,7 +104,7 @@ import Testing
         // Pure noise, with a plausible type byte so it gets past the first check.
         for _ in 0..<4000 {
             var bytes = (0..<random.below(200)).map { _ in UInt8(truncatingIfNeeded: random.next()) }
-            if !bytes.isEmpty { bytes[0] = UInt8(1 + random.below(7)) }
+            if !bytes.isEmpty { bytes[0] = UInt8(1 + random.below(8)) }
             attempt(bytes)
         }
         #expect(refused > 2500)
@@ -131,5 +142,16 @@ import Testing
             return
         }
         #expect(reason.count == 8192)
+    }
+}
+
+extension WireTests {
+    @Test func aMessageTypeFromANewerBuildIsSteppedOver() throws {
+        #expect(try Wire.decode([200, 1, 2, 3]) == .unknown(type: 200))
+        // And the stream carries on with the next frame.
+        var buffer = Wire.FrameBuffer()
+        buffer.append([4, 0, 0, 0, 200, 1, 2, 3] + Wire.frame(.reset))
+        #expect(try Wire.decode(try #require(try buffer.next())) == .unknown(type: 200))
+        #expect(try Wire.decode(try #require(try buffer.next())) == .reset)
     }
 }

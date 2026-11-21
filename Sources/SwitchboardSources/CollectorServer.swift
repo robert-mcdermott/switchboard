@@ -1,6 +1,12 @@
 import Foundation
 import SwitchboardCore
 
+/// Something that can describe its own state for the collector's health report.
+public protocol FlowSourceHealth {
+    var healthName: String { get }
+    var healthDetail: String { get }
+}
+
 /// The collector's publishing side: runs sources, and streams what they report to every
 /// connected client over a Unix domain socket.
 ///
@@ -59,17 +65,24 @@ public final class CollectorServer: @unchecked Sendable {
     private let path: String
     private let sources: [any FlowSource]
     private let resolver: any ProcessResolver
+    private let captures: [any CaptureProvider]
     private let lock = NSLock()
     private var clients: [Client] = []
     private var current: [[UInt64: SocketObservation]]
     private var processes: [Int32: ProcessRecord] = [:]
+    /// The latest names learned, so a client that connects later still gets them.
+    private var recentNames: [CaptureObservation] = []
+    private static let recentNameLimit = 4000
     private var listener: Int32 = -1
     private var running = false
 
-    public init(path: String, sources: [any FlowSource], resolver: any ProcessResolver) {
+    public init(
+        path: String, sources: [any FlowSource], resolver: any ProcessResolver, captures: [any CaptureProvider] = []
+    ) {
         self.path = path
         self.sources = sources
         self.resolver = resolver
+        self.captures = captures
         current = Array(repeating: [:], count: sources.count)
     }
 
@@ -137,6 +150,17 @@ public final class CollectorServer: @unchecked Sendable {
             lock.unlock()
             for chunk in Self.chunks(events) { frames.append(Wire.frame(.events(source: UInt8(index), chunk))) }
         }
+        for capture in captures {
+            let observations = capture.pollCapture(now: now)
+            guard !observations.isEmpty else { continue }
+            lock.lock()
+            recentNames.append(contentsOf: observations)
+            if recentNames.count > Self.recentNameLimit { recentNames.removeFirst(recentNames.count - Self.recentNameLimit) }
+            lock.unlock()
+            for start in stride(from: 0, to: observations.count, by: 500) {
+                frames.append(Wire.frame(.capture(Array(observations[start..<min(start + 500, observations.count)]))))
+            }
+        }
         broadcast(frames, includeHealth: includeHealth)
     }
 
@@ -144,7 +168,10 @@ public final class CollectorServer: @unchecked Sendable {
         lock.lock()
         let live = clients.filter { !$0.closed }
         clients = live
-        let health = sources.map { "\($0.name): \($0.health.detail)" }
+        var health = sources.map { "\($0.name): \($0.health.detail)" }
+        for capture in captures {
+            if let reporting = capture as? any FlowSourceHealth { health.append("\(reporting.healthName): \(reporting.healthDetail)") }
+        }
         var state: [[UInt8]]?
         for client in live {
             client.condition.lock()
@@ -179,6 +206,9 @@ public final class CollectorServer: @unchecked Sendable {
         for (index, table) in current.enumerated() {
             let events = table.keys.sorted().map { SourceEvent.seen(table[$0]!) }
             for chunk in Self.chunks(events) { frames.append(Wire.frame(.events(source: UInt8(index), chunk))) }
+        }
+        for start in stride(from: 0, to: recentNames.count, by: 500) {
+            frames.append(Wire.frame(.capture(Array(recentNames[start..<min(start + 500, recentNames.count)]))))
         }
         return frames
     }

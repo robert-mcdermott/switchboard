@@ -27,6 +27,7 @@ public final class CollectorClient: ProcessResolver, @unchecked Sendable {
     private var inbox: [[SourceEvent]]
     private var seen: [Set<UInt64>]
     private var processes: [Int32: ProcessRecord] = [:]
+    private var captured: [CaptureObservation] = []
     private var healthLines: [String] = []
     private var resyncCount: UInt32 = 0
     private var connected = true
@@ -110,6 +111,15 @@ public final class CollectorClient: ProcessResolver, @unchecked Sendable {
         return batches
     }
 
+    /// What the collector's packet capture has learned since the last call.
+    public func pollCapture() -> [CaptureObservation] {
+        lock.lock()
+        defer { lock.unlock() }
+        let drained = captured
+        captured.removeAll(keepingCapacity: true)
+        return drained
+    }
+
     public func resolve(pid: Int32, name: String, uniqueID: UInt64?) -> ProcessRecord {
         if let record = lock.withLock({ processes[pid] }) { return record }
         return fallback.resolve(pid: pid, name: name, uniqueID: uniqueID)
@@ -161,14 +171,16 @@ public final class CollectorClient: ProcessResolver, @unchecked Sendable {
                 inbox[index].append(contentsOf: seen[index].sorted().map { .removed(sourceID: $0) })
                 seen[index].removeAll()
             }
-        case .hello, .welcome, .refused:
+        case .capture(let observations):
+            captured.append(contentsOf: observations)
+        case .hello, .welcome, .refused, .unknown:
             break
         }
     }
 }
 
 /// One of the collector's sources, seen through a client connection.
-public final class CollectorSource: FlowSource, @unchecked Sendable {
+public final class CollectorSource: FlowSource, CaptureProvider, @unchecked Sendable {
     public let name: String
     private let client: CollectorClient
     private let lock = NSLock()
@@ -206,6 +218,11 @@ public final class CollectorSource: FlowSource, @unchecked Sendable {
         let events = pending
         pending.removeAll(keepingCapacity: true)
         return events
+    }
+
+    /// Capture observations arrive on the shared connection; the first source hands them over.
+    public func pollCapture(now: EngineTime) -> [CaptureObservation] {
+        siblings.first === self ? client.pollCapture() : []
     }
 
     private func deliver(_ events: [SourceEvent]) {

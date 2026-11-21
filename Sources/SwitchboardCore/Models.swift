@@ -100,6 +100,7 @@ public struct Flow: Sendable, Codable, Identifiable {
     public var service: String?
     public var serviceBasis: ServiceBasis?
     public var hostname: String?
+    public var hostnameSource: NameSource?
     /// Which source this flow's attribution came from.
     public var attribution: String
 

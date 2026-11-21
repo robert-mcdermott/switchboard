@@ -177,4 +177,28 @@ import Testing
         }
         #expect(Set(ids).count == ids.count)
     }
+
+    @Test func namesLearnedBeforeAClientConnectsStillReachIt() throws {
+        let path = Self.socketPath()
+        let source = SimulatorSource(scenario: .developer)
+        let server = CollectorServer(path: path, sources: [source], resolver: PassthroughProcessResolver(), captures: [source])
+        try server.start()
+        defer { server.stop() }
+        for step in 0..<12 { server.tick(now: Double(step) * 0.25, includeHealth: false) }
+
+        // The client arrives after every lookup has already happened.
+        let client = try CollectorClient(path: path, clientName: "test")
+        let engine = FlowEngine(resolver: client)
+        var observations = 0
+        #expect(Self.wait {
+            let captured = client.pollCapture()
+            observations += captured.count
+            engine.observe(captured, at: 3)
+            for (name, events) in client.pollBatches() { engine.ingest(events, from: name, at: 3) }
+            return observations > 50 && engine.flows.count > 100
+        })
+        let named = engine.flows.values.filter { $0.hostname != nil }.count
+        #expect(named == engine.flows.count)
+        #expect(engine.flows.values.contains { $0.serviceBasis == .observed })
+    }
 }

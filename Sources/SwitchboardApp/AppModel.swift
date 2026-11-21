@@ -12,6 +12,10 @@ struct ConnectionRow: Identifiable, Sendable {
     var user: String
     var proto: String
     var remote: String
+    /// Hostname, or empty when none is known.
+    var host: String
+    /// `DNS`, `TLS`, `PTR`, or empty.
+    var hostSource: String
     var remotePort: Int
     var localPort: Int
     var service: String
@@ -34,6 +38,13 @@ struct ConnectionRow: Identifiable, Sendable {
         user = record?.username ?? "–"
         proto = flow.key.proto.rawValue
         remote = flow.key.remote.address.description
+        host = flow.hostname ?? ""
+        switch flow.hostnameSource {
+        case .dns: hostSource = "DNS"
+        case .sni: hostSource = "TLS"
+        case .ptr: hostSource = "PTR"
+        case nil: hostSource = ""
+        }
         remotePort = Int(flow.key.remote.port)
         localPort = Int(flow.key.local.port)
         service = flow.service ?? "–"
@@ -61,6 +72,17 @@ struct ListenerRow: Identifiable, Sendable {
     var exposed: Bool
 }
 
+/// One DNS answer, for the DNS panel.
+struct DNSRow: Identifiable, Sendable {
+    let id: UInt64
+    var time: Date
+    var name: String
+    var addresses: String
+    var askedBy: String
+    /// Open connections to any of the answer's addresses.
+    var connections: Int
+}
+
 struct Talker: Identifiable, Sendable {
     var id: String
     var name: String
@@ -77,7 +99,7 @@ struct ThroughputSample: Identifiable, Sendable {
 }
 
 enum PanelTab: String, CaseIterable, Sendable {
-    case connections, talkers, throughput, mix, interfaces, listeners, health
+    case connections, talkers, throughput, mix, interfaces, dns, listeners, health
 
     var title: String {
         switch self {
@@ -86,6 +108,7 @@ enum PanelTab: String, CaseIterable, Sendable {
         case .throughput: "Throughput"
         case .mix: "Protocols"
         case .interfaces: "Interfaces"
+        case .dns: "DNS"
         case .listeners: "Listening"
         case .health: "Health"
         }
@@ -151,6 +174,7 @@ final class AppModel {
     private(set) var services: [Talker] = []
     private(set) var ports: [Talker] = []
     private(set) var interfaces: [Talker] = []
+    private(set) var dns: [DNSRow] = []
     private(set) var history: [ThroughputSample] = []
     private(set) var inspector: HoverInfo?
     private(set) var inspectorRows: [ConnectionRow] = []
@@ -315,6 +339,7 @@ final class AppModel {
         let threshold = defaults.object(forKey: "clusterThreshold") as? Int ?? 300
         applyClustering(defaults.string(forKey: "clustering") ?? "automatic", threshold: threshold)
         session.controller.palette = defaults.string(forKey: "palette").flatMap(PaletteScheme.init(rawValue:)) ?? .standard
+        session.controller.showsHostnames = (defaults.string(forKey: "hostnames") ?? "passive") != "off"
         let minutes = defaults.object(forKey: "historyMinutes") as? Double ?? 15
         window.maximumAge = max(minutes, 1) * 60
     }
@@ -546,6 +571,7 @@ final class AppModel {
         var services: [Talker] = []
         var ports: [Talker] = []
         var interfaces: [Talker] = []
+        var dns: [DNSRow] = []
 
         /// Runs off the main thread: on a busy machine this is tens of milliseconds, and
         /// on the main thread that is a dropped frame every second.
@@ -584,6 +610,17 @@ final class AppModel {
             derived.services = rank(Dictionary(grouping: matching) { $0.service ?? "unidentified" }) { $0 }
             derived.ports = rank(Dictionary(grouping: matching) { "\($0.key.proto.rawValue)/\($0.key.remote.port)" }) { $0 }
             derived.interfaces = rank(Dictionary(grouping: matching) { $0.interface ?? "unknown" }) { $0 }
+
+            // Newest first, each with how many connections are using what it resolved to.
+            var perAddress: [IPAddress: Int] = [:]
+            for flow in open { perAddress[flow.key.remote.address, default: 0] += 1 }
+            derived.dns = snapshot.dns.reversed().map { record in
+                DNSRow(
+                    id: record.id, time: Date(timeIntervalSince1970: snapshot.wallClock - (snapshot.time - record.time)),
+                    name: record.name, addresses: record.addresses.map(\.description).joined(separator: ", "),
+                    askedBy: record.pid.map { processes[$0]?.name ?? "pid \($0)" } ?? "–",
+                    connections: record.addresses.reduce(0) { $0 + (perAddress[$1] ?? 0) })
+            }
 
             derived.listeners = snapshot.listeners.map { listener in
                 let record = processes[listener.pid]
@@ -626,6 +663,7 @@ final class AppModel {
         services = derived.services
         ports = derived.ports
         interfaces = derived.interfaces
+        dns = derived.dns
         listeners = derived.listeners
         deriveInspector()
     }
@@ -725,6 +763,8 @@ final class AppModel {
             "historySeconds": timeRange.map { $0.upperBound - $0.lowerBound } ?? 0,
             "services": services.map(\.name),
             "interfaces": interfaces.map(\.name),
+            "namedRows": rows.count { !$0.host.isEmpty },
+            "dnsRows": dns.count,
             "launchToFirstDataSeconds": (processStart != nil && firstData != nil) ? firstData! - processStart! : -1,
             "windowPixels": NSApplication.shared.windows.first { $0.title == "Switchboard" }.map {
                 let size = $0.convertToBacking($0.contentLayoutRect).size

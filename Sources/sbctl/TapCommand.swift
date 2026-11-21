@@ -23,6 +23,7 @@ enum TapCommand {
         let started = Date()
         var totals: [String: (seen: Int, removed: Int)] = [:]
         var lastReport = Date()
+        var captureTotal = 0
         while client.isConnected, Date().timeIntervalSince(started) < seconds {
             for (source, events) in client.pollBatches() {
                 for event in events {
@@ -34,10 +35,16 @@ enum TapCommand {
                     totals[source] = total
                 }
             }
+            let captured = client.pollCapture()
+            captureTotal += captured.count
+            if options.has("--json") {
+                for observation in captured { print(String(decoding: try encoder.encode(observation), as: UTF8.self)) }
+            }
             if !options.has("--json"), Date().timeIntervalSince(lastReport) >= 1 {
                 lastReport = Date()
                 let summary = client.sources.map { "\($0): \(totals[$0]?.seen ?? 0) updates, \(totals[$0]?.removed ?? 0) closed" }
-                print(summary.joined(separator: "   ") + (client.resyncs > 0 ? "   resyncs: \(client.resyncs)" : ""))
+                print(summary.joined(separator: "   ") + "   capture: \(captureTotal) observations" + (client.resyncs > 0 ? "   resyncs: \(client.resyncs)" : ""))
+                captureTotal = 0
                 for line in client.health { print("  \(line)") }
                 totals.removeAll()
             }

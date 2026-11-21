@@ -16,7 +16,7 @@ func value(_ flag: String) -> String? {
 }
 
 if arguments.contains("--help") || arguments.contains("-h") {
-    print("usage: switchboardd [--socket PATH]\nDefault socket: \(Switchboard.collectorSocketPath) (needs root).")
+    print("usage: switchboardd [--socket PATH] [--no-capture]\nDefault socket: \(Switchboard.collectorSocketPath) (needs root).")
     exit(0)
 }
 
@@ -30,7 +30,22 @@ func log(_ message: String) {
 // NetworkStatistics first: it has true counters, RTT, and events. The kernel's own list
 // second: complete, and only readable by root.
 let sources: [any FlowSource] = [NStatSource(counterInterval: 1.0), KernelSocketListSource()]
-let server = CollectorServer(path: socketPath, sources: sources, resolver: LibProcResolver())
+// Packet capture supplies hostnames and observed services. It needs root; without it the
+// collector still serves everything else.
+let capture = PktapCapture()
+var captures: [any CaptureProvider] = []
+if arguments.contains("--no-capture") {
+    log("packet capture disabled by --no-capture")
+} else {
+    // Listed either way, so the health report says why there are no hostnames.
+    captures.append(capture)
+    do {
+        try capture.start()
+    } catch {
+        log("\(error); hostnames will not be available")
+    }
+}
+let server = CollectorServer(path: socketPath, sources: sources, resolver: LibProcResolver(), captures: captures)
 
 do {
     try server.start()

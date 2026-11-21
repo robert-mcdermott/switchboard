@@ -73,6 +73,7 @@ final class Session {
             let events = source.poll(now: time)
             try writer?.append(TraceFile.Record(t: time, source: source.name, events: events))
             let delta = engine.ingest(events, from: source.name, at: time)
+            if let capture = source as? CaptureProvider { engine.observe(capture.pollCapture(now: time), at: time) }
             combined.opened += delta.opened
             combined.updated += delta.updated
             combined.closed += delta.closed
