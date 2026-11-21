@@ -222,7 +222,8 @@ final class AppModel {
         do {
             let epoch = CACurrentMediaTime()
             let feed = try LiveFeed(
-                spec: sourceSpec, flows: value("--flows").flatMap(Int.init), controller: controller,
+                spec: sourceSpec, flows: value("--flows").flatMap(Int.init),
+                collectorPath: value("--collector-socket") ?? Switchboard.collectorSocketPath, controller: controller,
                 clock: { Float(CACurrentMediaTime() - epoch) },
                 onSummary: { [weak self] summary in
                     Task { @MainActor in self?.summary = summary }
@@ -672,8 +673,17 @@ final class AppModel {
 
     /// Standalone shows the login user's processes only; say so rather than imply more.
     var modeLine: String {
-        if simulated { return "SIMULATED · \(sourceSpec)" }
-        return getuid() == 0 ? "STANDALONE · all users" : "STANDALONE · your processes"
+        switch summary.mode {
+        case .simulated: "SIMULATED · \(sourceSpec)"
+        case .standalone: getuid() == 0 ? "STANDALONE · all users" : "STANDALONE · your processes"
+        case .full(let uid): uid == 0 ? "FULL · every account, via the collector" : "FULL · collector running as uid \(uid)"
+        }
+    }
+
+    /// The collector is feeding the app.
+    var fullMode: Bool {
+        if case .full = summary.mode { return true }
+        return false
     }
 
     var matchLine: String {
@@ -706,6 +716,8 @@ final class AppModel {
             "inspectorTitle": inspector?.title ?? "",
             "inspectorRows": inspectorRows.count,
             "scrubbedTo": scrubTime ?? -1,
+            "mode": modeLine,
+            "sourceLines": summary.sources,
             "keepEnded": keepEnded,
             "endedKept": session.controller.endedCount,
             "scanSockets": scan?.sockets ?? -1,

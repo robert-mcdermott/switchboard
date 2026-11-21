@@ -2,7 +2,7 @@
 
 A real-time network observatory for macOS. Every connection on the machine, who owns it, where it goes, and how hard it is working — drawn as a living graph that an operator can read at a glance and interrogate in seconds.
 
-**Status:** v0.4 draft, revised after M0, M1, and M2 · **Companions:** [ROADMAP.md](ROADMAP.md) · [M0 findings](spikes/M0-findings.md) · [M1 findings](spikes/M1-findings.md) · [M2 findings](spikes/M2-findings.md) · [M3 findings](spikes/M3-findings.md)
+**Status:** v0.4 draft, revised after M0, M1, and M2 · **Companions:** [ROADMAP.md](ROADMAP.md) · [M0 findings](spikes/M0-findings.md) · [M1 findings](spikes/M1-findings.md) · [M2 findings](spikes/M2-findings.md) · [M3 findings](spikes/M3-findings.md) · [M4 findings](spikes/M4-findings.md)
 
 ---
 
@@ -151,7 +151,7 @@ Every source that leans on a private layout sits behind an adapter with a record
 
 The app starts in Standalone, looks for the collector socket, and switches to Full when it appears. The Health panel always states the current mode and what each source is contributing, and in Standalone it says plainly that system daemons and other users' processes are not shown.
 
-`FlowEngine` is one library. In Standalone the app hosts it in-process; in Full the daemon hosts it and the app consumes its deltas over a socket. Everything above `FlowFeed` is identical in both.
+`FlowEngine` is one library, and as built in M4 it always runs in the app. In Standalone it is fed by sources inside the app; in Full it is fed by the collector, which runs the privileged sources and forwards what they observe over a socket. Everything above the sources is the same code in both modes, and the root process gathers and forwards without interpreting ([M4 findings](spikes/M4-findings.md)).
 
 ### 5.2 Package layout
 
@@ -234,7 +234,7 @@ Standalone mode has no passive source, so its default is Off with a one-click pr
 
 ## 7. Collector daemon
 
-`switchboardd` is `FlowEngine` plus a publisher. It has no configuration that changes system state and exposes no commands beyond subscribe.
+`switchboardd` runs the privileged sources and publishes their observations. It has no configuration that changes system state and accepts no commands: a client says hello and then only listens.
 
 **Security posture**
 - Runs as root; opens no network listeners.
@@ -244,9 +244,9 @@ Standalone mode has no passive source, so its default is Off with a one-click pr
 
 **Wire protocol**
 - Length-prefixed frames: `u32 length · u8 type · payload`. Little-endian, varint integers, length-prefixed UTF-8.
-- `Hello{protocol, client}` → `Welcome{version, mode, capabilities}`; a protocol mismatch is refused with a readable error.
-- `Snapshot` on connect, then `FlowDelta{opened, updated, closed}` at 4–20 Hz, plus `ProcessDelta`, `ListenerDelta`, `DnsObservation`, `InterfaceStats`, `Health`.
-- Backpressure: a slow client gets coalesced deltas and a `coalesced` counter. The engine never blocks on a client.
+- `hello{protocol, client}` → `welcome{protocol, version, uid, sources}`; a protocol mismatch is refused with a readable reason.
+- On connect, `reset` and the complete current state; then `events{source, …}` four times a second, `process` records as processes are first seen, and `health` each second.
+- Backpressure: a client more than 8 MB behind has its backlog dropped and is sent `reset` and the current state again. Collection never waits for a client.
 - `sbctl tap --json` decodes the stream to JSON lines for debugging; `sbctl record` writes a `.sbtrace` file that `TraceReplay` can play back.
 
 **Install**

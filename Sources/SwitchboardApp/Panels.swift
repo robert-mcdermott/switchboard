@@ -264,14 +264,28 @@ struct HealthPanel: View {
                 VStack(alignment: .leading, spacing: 4) {
                     SectionTitle("Mode")
                     Text(model.modeLine).foregroundStyle(Color.readout)
-                    if !model.simulated, getuid() != 0 {
+                    if model.fullMode {
+                        Text("The collector is running as root and reports every account's connections. The app switched to it automatically and will fall back to Standalone if it stops.")
+                            .foregroundStyle(Color.dim)
+                    } else if !model.simulated, getuid() != 0 {
                         Text("Standalone mode shows connections made by your own processes. System daemons and other accounts are not shown; that needs the root collector, which is not built yet.")
                             .foregroundStyle(Color.dim)
                         Text("Around one in twenty of your own connections is also withheld by macOS from unprivileged tools. The cause is not yet known.")
                             .foregroundStyle(Color.dim)
+                        HStack(spacing: 10) {
+                            Text("To see everything, install the collector. In Terminal, from the Switchboard folder:")
+                                .foregroundStyle(Color.dim)
+                            Text("sudo scripts/install.sh").foregroundStyle(Color.signal).textSelection(.enabled)
+                            Button("Copy") {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString("sudo scripts/install.sh", forType: .string)
+                            }
+                        }
+                        Text("Switchboard never asks for your password itself. The app notices the collector within a couple of seconds of it starting.")
+                            .foregroundStyle(Color.dim)
                     }
                 }
-                if !model.simulated, getuid() != 0 {
+                if !model.simulated, !model.fullMode, getuid() != 0 {
                     VStack(alignment: .leading, spacing: 4) {
                         SectionTitle("What is not shown")
                         HStack(spacing: 10) {

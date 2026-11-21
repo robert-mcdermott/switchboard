@@ -8,6 +8,8 @@ public enum SourceSpec {
         public var sources: [any FlowSource]
         /// The traffic is synthetic or recorded, so its processes do not exist on this machine.
         public var simulated: Bool
+        /// Set when the sources come from the collector, which also knows the processes.
+        public var collector: CollectorClient?
     }
 
     public enum SpecError: Error, CustomStringConvertible {
@@ -17,7 +19,7 @@ public enum SourceSpec {
             switch self {
             case .unknown(let text):
                 let scenarios = SimulatorSource.Scenario.allCases.map(\.rawValue).joined(separator: "|")
-                return "unknown source '\(text)'. Use nstat, nettop, nstat+nettop, sim:<\(scenarios)>, or trace:<file>"
+                return "unknown source '\(text)'. Use nstat, nettop, nstat+nettop, collector[:socket], sim:<\(scenarios)>, or trace:<file>"
             }
         }
     }
@@ -25,12 +27,18 @@ public enum SourceSpec {
     public static func make(_ spec: String, flows: Int? = nil, counterInterval: Double = 1.0) throws -> Resolved {
         var sources: [any FlowSource] = []
         var simulated = false
+        var collector: CollectorClient?
         for part in spec.split(separator: "+") {
             switch part {
             case "nstat":
                 sources.append(NStatSource(counterInterval: counterInterval))
             case "nettop":
                 sources.append(NettopSource())
+            case let text where text == "collector" || text.hasPrefix("collector:"):
+                let path = text == "collector" ? Switchboard.collectorSocketPath : String(text.dropFirst(10))
+                let client = try CollectorClient(path: path, clientName: "switchboard")
+                collector = client
+                sources.append(contentsOf: CollectorSource.all(for: client))
             case let text where text.hasPrefix("sim:"):
                 guard let scenario = SimulatorSource.Scenario(rawValue: String(text.dropFirst(4))) else {
                     throw SpecError.unknown(spec)
@@ -46,11 +54,12 @@ public enum SourceSpec {
             }
         }
         guard !sources.isEmpty else { throw SpecError.unknown(spec) }
-        return Resolved(sources: sources, simulated: simulated)
+        return Resolved(sources: sources, simulated: simulated, collector: collector)
     }
 
     /// Simulated and replayed processes do not exist, so there is nothing to look up.
     public static func resolver(for resolved: Resolved) -> any ProcessResolver {
-        resolved.simulated ? PassthroughProcessResolver() : LibProcResolver()
+        if let collector = resolved.collector { return collector }
+        return resolved.simulated ? PassthroughProcessResolver() : LibProcResolver()
     }
 }

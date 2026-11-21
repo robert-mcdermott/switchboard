@@ -12,8 +12,9 @@ enum SBCtl {
           sbctl record <file> [--source S] [--seconds N]   save source events to a trace
           sbctl bench [--flows N] | --live                 engine cost, simulated or on this machine
           sbctl verify                                     check the live engine against netstat and known traffic
+          sbctl tap [--socket PATH] [--json] [--seconds N] watch what the collector publishes
 
-          sources: nstat (default), nettop, nstat+nettop, sim:<scenario>, trace:<file>
+          sources: nstat (default), nettop, nstat+nettop, collector[:socket], sim:<scenario>, trace:<file>
           scenarios: quiet, developer, stress, beacon, portscan
 
           sbctl probe sockets [--list] [--verify]   kernel socket list (empty unless root)
@@ -33,6 +34,7 @@ enum SBCtl {
             case "record": return try RecordCommand.run(options)
             case "bench": return try BenchCommand.run(options)
             case "verify": return try VerifyCommand.run(options)
+            case "tap": return try TapCommand.run(options)
             default: break
             }
         } catch {

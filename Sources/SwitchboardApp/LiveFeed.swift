@@ -4,8 +4,20 @@ import SwitchboardRender
 import SwitchboardSources
 
 /// Runs the sources and the flow engine on a background thread and hands each result to
-/// the graph. This is Standalone mode: the engine lives inside the app (docs/SPEC.md §5.1).
+/// the graph.
+///
+/// It starts in Standalone mode, with the engine fed by sources inside the app. When the
+/// root collector's socket appears it switches to Full mode and feeds the engine from the
+/// collector instead; if the collector goes away it switches back (docs/SPEC.md §5.1).
 final class LiveFeed: @unchecked Sendable {
+    enum Mode: Sendable, Equatable {
+        case simulated
+        /// Sources inside the app: this account's processes.
+        case standalone
+        /// The collector, and the account it runs as. Zero is root, which sees everyone.
+        case full(collectorUID: UInt32)
+    }
+
     struct Summary: Sendable {
         var flows = 0
         var listeners = 0
@@ -15,27 +27,44 @@ final class LiveFeed: @unchecked Sendable {
         var rateOut = 0.0
         var sources: [String] = []
         var healthy = true
+        var mode = Mode.standalone
     }
 
-    private let sources: [any FlowSource]
-    private let engine: FlowEngine
+    private let spec: String
+    private let flows: Int?
     private let controller: GraphController
     private let clock: @Sendable () -> Float
     private let onSummary: @Sendable (Summary) -> Void
     private let onSnapshot: @Sendable (EngineSnapshot) -> Void
+    private let collectorPath: String
+    /// Only the default source gives way to the collector; an explicit choice is kept.
+    private let followsCollector: Bool
     private let lock = NSLock()
     private var running = false
+    private var foreground = true
     /// Synthetic or recorded traffic.
     let simulated: Bool
 
+    // Touched only on the feed thread.
+    private var sources: [any FlowSource]
+    private var engine: FlowEngine
+    private var collector: CollectorClient?
+    private var failures: [String] = []
+
     init(
-        spec: String, flows: Int?, controller: GraphController, clock: @escaping @Sendable () -> Float,
+        spec: String, flows: Int?, collectorPath: String, controller: GraphController,
+        clock: @escaping @Sendable () -> Float,
         onSummary: @escaping @Sendable (Summary) -> Void,
         onSnapshot: @escaping @Sendable (EngineSnapshot) -> Void
     ) throws {
         let resolved = try SourceSpec.make(spec, flows: flows)
+        self.spec = spec
+        self.flows = flows
+        self.collectorPath = collectorPath
         sources = resolved.sources
         simulated = resolved.simulated
+        collector = resolved.collector
+        followsCollector = spec == "nstat"
         engine = FlowEngine(resolver: SourceSpec.resolver(for: resolved))
         engine.wallClockOrigin = Date().timeIntervalSince1970
         self.controller = controller
@@ -59,20 +88,51 @@ final class LiveFeed: @unchecked Sendable {
     /// Counters are refreshed twice as often while the window is in front. Asking for them
     /// is what costs CPU, so there is no reason to pay when nobody is looking.
     func setForeground(_ foreground: Bool) {
-        for case let source as NStatSource in sources {
-            source.counterInterval = foreground ? 0.5 : 1.0
-        }
+        lock.withLock { self.foreground = foreground }
     }
 
-    private func run() {
-        var failures: [String] = []
+    private func startSources() {
+        failures = []
         for source in sources {
             do { try source.start() } catch { failures.append("\(source.name): \(error)") }
         }
+    }
+
+    /// Replaces the sources and starts the engine afresh. Flows are keyed by the source
+    /// that reported them, so they cannot be carried across; the graph keeps its layout.
+    private func switchSources(to resolved: SourceSpec.Resolved, origin: Double) {
+        sources.forEach { $0.stop() }
+        sources = resolved.sources
+        collector = resolved.collector
+        engine = FlowEngine(resolver: SourceSpec.resolver(for: resolved))
+        engine.wallClockOrigin = origin
+        startSources()
+    }
+
+    private func run() {
+        startSources()
         let started = DispatchTime.now().uptimeNanoseconds
+        let origin = engine.wallClockOrigin
         var tick = 0
         while lock.withLock({ running }) {
             let now = Double(DispatchTime.now().uptimeNanoseconds - started) / 1e9
+
+            if followsCollector {
+                if let collector, !collector.isConnected {
+                    // The collector has gone: carry on with what the app can see by itself.
+                    if let local = try? SourceSpec.make(spec, flows: flows) { switchSources(to: local, origin: origin) }
+                } else if collector == nil, tick % 8 == 0, FileManager.default.fileExists(atPath: collectorPath),
+                          let full = try? SourceSpec.make("collector:\(collectorPath)")
+                {
+                    switchSources(to: full, origin: origin)
+                }
+            }
+
+            let interval = lock.withLock { foreground } ? 0.5 : 1.0
+            for case let source as NStatSource in sources where source.counterInterval != interval {
+                source.counterInterval = interval
+            }
+
             for source in sources {
                 engine.ingest(source.poll(now: now), from: source.name, at: now)
             }
@@ -92,12 +152,18 @@ final class LiveFeed: @unchecked Sendable {
                 summary.exposed = engine.listeners.values.count { $0.exposed }
                 summary.processes = engine.processes.count
                 summary.sources = sources.map { "\($0.name): \($0.health.detail)" } + failures
-                summary.healthy = failures.isEmpty && sources.allSatisfy { $0.health.running }
+                // In Full mode a source the collector could not run is reported, not treated as a fault here.
+                summary.healthy = failures.isEmpty && (collector != nil || sources.allSatisfy { $0.health.running })
+                if let collector {
+                    summary.mode = .full(collectorUID: collector.collectorUID)
+                } else {
+                    summary.mode = simulated ? .simulated : .standalone
+                }
                 onSummary(summary)
             }
             tick += 1
             Thread.sleep(forTimeInterval: 0.25)
         }
-        for source in sources { source.stop() }
+        sources.forEach { $0.stop() }
     }
 }

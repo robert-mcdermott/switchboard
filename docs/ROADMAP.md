@@ -166,6 +166,8 @@ M4 and M5 are independent of each other and can proceed in parallel once M3 clos
 
 **Needs from the owner:** running the install script under `sudo`.
 
+**Status: part one built and run as root by the owner.** The wire codec, the daemon, the client, automatic switching between Standalone and Full, the kernel socket list as a second collector source, and the install scripts are done, with 104 tests passing. The owner installed the collector, saw every account's processes in Full mode, and uninstalled it. Coverage against `netstat` as root has not been measured yet. Packet capture, hostnames, the DNS panel, and observed service labels are part two. Details in [spikes/M4-findings.md](spikes/M4-findings.md).
+
 ---
 
 ## M5 — Memory
