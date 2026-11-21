@@ -12,6 +12,12 @@ public enum PickTarget: Hashable, Sendable {
     case node(NodeID)
     /// Always process first, endpoint second; or host first, process second.
     case edge(NodeID, NodeID)
+
+    /// The line from this Mac to a process.
+    var isTrunk: Bool {
+        if case .edge(.host, _) = self { return true }
+        return false
+    }
 }
 
 /// What the tooltip shows for whatever is under the pointer.
@@ -134,6 +140,10 @@ public final class GraphController: @unchecked Sendable {
     private var processes: [Int32: ProcessRecord] = [:]
     private var listeners: [Int32: [Listener]] = [:]
     private var snapshotTime: EngineTime = 0
+    private var lastSnapshot: EngineSnapshot?
+    private var lastAnimationTime: Float = 0
+    private var activeFilter = FlowFilter.all
+    private var focusTarget: PickTarget?
 
     /// While true, snapshots are ignored and the picture holds still. Collection carries on.
     public var paused: Bool {
@@ -156,11 +166,38 @@ public final class GraphController: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         guard !isPaused else { return }
+        lastSnapshot = snapshot
+        lastAnimationTime = time
+        rebuild(snapshot, time: time)
+    }
+
+    /// Only flows matching the filter are drawn. Takes effect at once, even while paused.
+    public var filter: FlowFilter {
+        get { lock.withLock { activeFilter } }
+        set {
+            lock.lock()
+            defer { lock.unlock() }
+            guard newValue != activeFilter else { return }
+            activeFilter = newValue
+            if let lastSnapshot { rebuild(lastSnapshot, time: lastAnimationTime) }
+        }
+    }
+
+    /// Focus mode: everything not connected to this target is dimmed almost to nothing.
+    public var focus: PickTarget? {
+        get { lock.withLock { focusTarget } }
+        set { lock.withLock { focusTarget = newValue } }
+    }
+
+    private func rebuild(_ snapshot: EngineSnapshot, time: Float) {
+        processes = Dictionary(uniqueKeysWithValues: snapshot.processes.map { ($0.pid, $0) })
+        let filter = activeFilter
 
         var byEdge: [EdgeKey: Aggregate] = [:]
         var byProcess: [Int32: Aggregate] = [:]
         var byEndpoint: [IPAddress: Aggregate] = [:]
         for flow in snapshot.flows {
+            if !filter.isEmpty, !filter.matches(flow, process: processes[flow.pid], now: snapshot.time) { continue }
             var life = 1.0
             if flow.state == .closed {
                 life = 1 - (snapshot.time - (flow.closedAt ?? snapshot.time)) / Self.fadeSeconds
@@ -178,7 +215,6 @@ public final class GraphController: @unchecked Sendable {
         edgeAggregates = byEdge
         processAggregates = byProcess
         endpointAggregates = byEndpoint
-        processes = Dictionary(uniqueKeysWithValues: snapshot.processes.map { ($0.pid, $0) })
         listeners = Dictionary(grouping: snapshot.listeners, by: \.pid)
         snapshotTime = snapshot.time
 
@@ -383,9 +419,23 @@ public final class GraphController: @unchecked Sendable {
         var highlightedNode: NodeID?
         if case .node(let id) = highlight { highlightedNode = id }
 
+        // In focus mode, work out which nodes belong to the focused neighbourhood.
+        var inFocus: Set<Int>?
+        if let focusTarget {
+            var members = Set<Int>()
+            for edge in edges where Self.touches(edge, focusTarget, nodes) {
+                members.insert(edge.from)
+                members.insert(edge.to)
+            }
+            if case .node(let id) = focusTarget, let offset = index[id] { members.insert(offset) }
+            // A focus that no longer exists dims nothing.
+            if !members.isEmpty { inFocus = members }
+        }
+
         for (offset, node) in nodes.enumerated() {
             var ring = node.ring
             var intensity = node.intensity
+            if let inFocus, !inFocus.contains(offset) { intensity *= 0.18 }
             if node.id == highlightedNode {
                 ring = SIMD4(1, 1, 1, 1)
                 intensity = 1
@@ -402,13 +452,14 @@ public final class GraphController: @unchecked Sendable {
             let along = b - a
             let control = (a + b) * 0.5 + SIMD2(-along.y, along.x) * edge.bend
             var glow = edge.glow
+            var pulse = edge.pulse
             var halfWidth = edge.halfWidth
+            if let focusTarget, inFocus != nil, !Self.touches(edge, focusTarget, nodes) {
+                glow *= 0.1
+                pulse = 0
+            }
             if let highlight {
-                let touches: Bool
-                switch highlight {
-                case .node(let id): touches = nodes[edge.from].id == id || nodes[edge.to].id == id
-                case .edge: touches = edge.target == highlight
-                }
+                let touches = Self.touches(edge, highlight, nodes)
                 if touches {
                     glow = glow * 1.8 + 0.22
                     halfWidth += 0.6
@@ -418,17 +469,17 @@ public final class GraphController: @unchecked Sendable {
             }
             frame.edges.append(EdgeInstance(
                 p0: a, p1: b, control: control, halfWidth: halfWidth, phase: edge.phase,
-                color: SIMD4(edge.color, 1), speed: edge.speed, density: edge.density, glow: glow, pulse: edge.pulse))
+                color: SIMD4(edge.color, 1), speed: edge.speed, density: edge.density, glow: glow, pulse: pulse))
         }
 
         // The host and every process are named; endpoints compete for the remaining labels.
         if !nodes.isEmpty { frame.labels.append(LabelRequest(text: nodes[0].label, node: 0, kind: 0)) }
         let named = (1..<min(processCount + 1, nodes.count)).sorted { nodes[$0].priority > nodes[$1].priority }
-        for offset in named.prefix(160) {
+        for offset in named.prefix(160) where inFocus?.contains(offset) ?? true {
             frame.labels.append(LabelRequest(text: nodes[offset].label, node: offset, kind: 1))
         }
         let endpoints = nodes.indices.dropFirst(processCount + 1)
-        var chosen = endpoints.filter { nodes[$0].priority > 1 }
+        var chosen = endpoints.filter { nodes[$0].priority > 1 && (inFocus?.contains($0) ?? true) }
             .sorted { nodes[$0].priority > nodes[$1].priority }.prefix(labelBudget).map { $0 }
         if let highlightedNode, let offset = index[highlightedNode], offset > processCount, !chosen.contains(offset) {
             chosen.append(offset)
@@ -440,6 +491,31 @@ public final class GraphController: @unchecked Sendable {
             frame.labels.append(LabelRequest(text: nodes[offset].label, node: offset, kind: 2))
         }
         return frame
+    }
+
+    private static func touches(_ edge: Edge, _ target: PickTarget, _ nodes: [Node]) -> Bool {
+        switch target {
+        case .node(.host): edge.target.isTrunk
+        case .node(let id): nodes[edge.from].id == id || nodes[edge.to].id == id
+        case .edge: edge.target == target
+        }
+    }
+
+    /// The flows behind a node or edge, for the inspector.
+    public func flows(for target: PickTarget) -> [Flow] {
+        lock.lock()
+        defer { lock.unlock() }
+        switch target {
+        case .node(.host): return processAggregates.values.flatMap(\.flows)
+        case .node(.process(let pid)), .edge(.host, .process(let pid)): return processAggregates[pid]?.flows ?? []
+        case .node(.endpoint(let address)): return endpointAggregates[address]?.flows ?? []
+        case .edge(.process(let pid), .endpoint(let address)): return edgeAggregates[EdgeKey(pid: pid, address: address)]?.flows ?? []
+        default: return []
+        }
+    }
+
+    public func process(_ pid: Int32) -> ProcessRecord? {
+        lock.withLock { processes[pid] }
     }
 
     /// Nodes are stored host first, then processes, then endpoints.

@@ -210,3 +210,74 @@ private func flow(pid: Int32, remote: String, port: UInt16 = 443, id: UInt64) ->
         #expect(dimmer > brighter)
     }
 }
+
+@Suite struct FilterAndFocusTests {
+    @Test func drawsOnlyWhatTheFilterMatches() throws {
+        let (controller, engine) = simulated()
+        let everything = controller.frame(labelBudget: 0)
+        controller.filter = try FlowFilter("pid=2010")
+        let filtered = controller.frame(labelBudget: 0)
+        // The host, one process, and that process's destinations.
+        #expect(filtered.nodes.filter { $0.kind == 1 }.count == 1)
+        #expect(filtered.nodes.count < everything.nodes.count)
+        let destinations = Set(engine.flows.values.filter { flow in
+            guard flow.pid == 2010 else { return false }
+            guard flow.state == .closed, let closedAt = flow.closedAt else { return true }
+            return engine.now - closedAt < GraphController.fadeSeconds
+        }.map(\.key.remote.address))
+        #expect(filtered.nodes.filter { $0.kind == 2 }.count == destinations.count)
+        #expect(controller.flows(for: .node(.host)).allSatisfy { $0.pid == 2010 })
+
+        controller.filter = .all
+        #expect(controller.frame(labelBudget: 0).nodes.count == everything.nodes.count)
+    }
+
+    @Test func appliesANewFilterEvenWhilePaused() throws {
+        let (controller, _) = simulated()
+        controller.paused = true
+        controller.filter = try FlowFilter("pid=2010")
+        #expect(controller.frame(labelBudget: 0).nodes.filter { $0.kind == 1 }.count == 1)
+    }
+
+    @Test func focusDimsEverythingOutsideTheNeighbourhood() {
+        let (controller, _) = simulated()
+        let plain = controller.frame(labelBudget: 0)
+        controller.focus = .node(.process(2010))
+        let focused = controller.frame(labelBudget: 0)
+
+        let dimmedNodes = zip(plain.nodes, focused.nodes).filter { $0.1.intensity < $0.0.intensity * 0.5 }.count
+        let keptNodes = zip(plain.nodes, focused.nodes).filter { $0.1.intensity == $0.0.intensity }.count
+        #expect(dimmedNodes > 0)
+        // The focused process, the host, and its destinations keep their brightness.
+        #expect(keptNodes >= 3)
+        #expect(dimmedNodes + keptNodes == plain.nodes.count)
+
+        let stilled = zip(plain.edges, focused.edges).filter { $0.0.pulse > 0 && $0.1.pulse == 0 }.count
+        #expect(stilled > 0)
+        // Only the neighbourhood keeps its labels.
+        #expect(focused.labels.count < plain.labels.count)
+
+        controller.focus = nil
+        #expect(controller.frame(labelBudget: 0).nodes.map(\.intensity) == plain.nodes.map(\.intensity))
+    }
+
+    @Test func aFocusThatHasGoneAwayDimsNothing() {
+        let (controller, _) = simulated()
+        let plain = controller.frame(labelBudget: 0)
+        controller.focus = .node(.process(99_999))
+        #expect(controller.frame(labelBudget: 0).nodes.map(\.intensity) == plain.nodes.map(\.intensity))
+    }
+
+    @Test func listsTheFlowsBehindEachKindOfTarget() {
+        let (controller, _) = simulated()
+        let all = controller.flows(for: .node(.host))
+        let process = controller.flows(for: .node(.process(2010)))
+        #expect(!process.isEmpty && process.count < all.count)
+        #expect(process.allSatisfy { $0.pid == 2010 })
+        let address = process[0].key.remote.address
+        let edge = controller.flows(for: .edge(.process(2010), .endpoint(address)))
+        #expect(!edge.isEmpty)
+        #expect(edge.allSatisfy { $0.pid == 2010 && $0.key.remote.address == address })
+        #expect(controller.flows(for: .node(.endpoint(address))).count >= edge.count)
+    }
+}

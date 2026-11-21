@@ -13,7 +13,11 @@ public final class GraphSession: NSObject, MTKViewDelegate {
     }
 
     public enum Key: Sendable {
-        case togglePause, cycleProfile, resetView
+        case togglePause, cycleProfile, resetView, focusFilter, toggleInspector, togglePanel, escape
+    }
+
+    public enum ContextAction: Sendable {
+        case filterToThis, focusOnThis, copyDetails, revealInFinder
     }
 
     public let controller: GraphController
@@ -25,6 +29,11 @@ public final class GraphSession: NSObject, MTKViewDelegate {
     /// Hover details and where the pointer is, in points from the view's top-left corner.
     public var onHover: ((HoverInfo?, CGPoint) -> Void)?
     public var onKey: ((Key) -> Void)?
+    /// A click on the graph: the target, or `nil` for empty space.
+    public var onSelect: ((PickTarget?) -> Void)?
+    public var onContext: ((ContextAction, PickTarget) -> Void)?
+    /// What is pinned in the inspector. Stays lit when the pointer moves away.
+    public var selection: PickTarget?
     public var onFailure: ((String) -> Void)?
     /// Set to have the next frame saved as a PNG.
     public var capture: FrameCapture?
@@ -84,7 +93,7 @@ public final class GraphSession: NSObject, MTKViewDelegate {
         else { return }
 
         controller.step()
-        let frame = controller.frame(labelBudget: profile.labelBudget, highlight: hoverTarget)
+        let frame = controller.frame(labelBudget: profile.labelBudget, highlight: hoverTarget ?? selection)
         nodeCount = frame.nodes.count
         edgeCount = frame.edges.count
         if firstDataFrame == nil, !frame.edges.isEmpty { firstDataFrame = Date() }
@@ -199,7 +208,29 @@ public final class GraphSession: NSObject, MTKViewDelegate {
 
     func key(_ key: Key) {
         if key == .resetView { resetView() }
+        if key == .escape { controller.focus = nil }
         onKey?(key)
+    }
+
+    func target(at point: CGPoint) -> PickTarget? {
+        guard let view else { return nil }
+        let backing = Float(view.window?.backingScaleFactor ?? 2)
+        return controller.pick(at: world(at: point, in: view), slack: 5 * backing / camera(for: view).scale)
+    }
+
+    func click(at point: CGPoint, count: Int) {
+        let target = target(at: point)
+        if count >= 2 {
+            // Double-click isolates a neighbourhood; double-clicking it again, or empty space, releases it.
+            controller.focus = (target == controller.focus) ? nil : target
+        }
+        selection = target
+        onSelect?(target)
+    }
+
+    func context(_ action: ContextAction, _ target: PickTarget) {
+        if action == .focusOnThis { controller.focus = target }
+        onContext?(action, target)
     }
 }
 
@@ -225,13 +256,48 @@ final class GraphMTKView: MTKView {
     override func mouseMoved(with event: NSEvent) { session?.hover(at: location(event)) }
     override func mouseExited(with event: NSEvent) { session?.hover(at: nil) }
 
+    private var pressedAt: CGPoint?
+    private var dragged = false
+    private var contextTarget: PickTarget?
+
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
+        pressedAt = location(event)
+        dragged = false
     }
 
     override func mouseDragged(with event: NSEvent) {
+        // A press that wanders a few points is still a click.
+        if let pressedAt, hypot(location(event).x - pressedAt.x, location(event).y - pressedAt.y) > 3 { dragged = true }
+        guard dragged else { return }
         session?.pan(byPoints: CGSize(width: event.deltaX, height: -event.deltaY))
         session?.hover(at: nil)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        if !dragged { session?.click(at: location(event), count: event.clickCount) }
+        pressedAt = nil
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard let session, let target = session.target(at: location(event)) else { return nil }
+        contextTarget = target
+        let menu = NSMenu()
+        var entries: [(String, Int)] = [("Filter to This", 0), ("Focus on This", 1), ("Copy Details", 2)]
+        if case .node(.process) = target { entries.append(("Reveal in Finder", 3)) }
+        for (title, tag) in entries {
+            let item = NSMenuItem(title: title, action: #selector(contextChosen(_:)), keyEquivalent: "")
+            item.target = self
+            item.tag = tag
+            menu.addItem(item)
+        }
+        return menu
+    }
+
+    @objc private func contextChosen(_ sender: NSMenuItem) {
+        guard let contextTarget else { return }
+        let actions: [GraphSession.ContextAction] = [.filterToThis, .focusOnThis, .copyDetails, .revealInFinder]
+        session?.context(actions[sender.tag], contextTarget)
     }
 
     override func scrollWheel(with event: NSEvent) {
@@ -253,6 +319,10 @@ final class GraphMTKView: MTKView {
         case " ": session?.key(.togglePause)
         case "p", "P": session?.key(.cycleProfile)
         case "0": session?.key(.resetView)
+        case "/": session?.key(.focusFilter)
+        case "i", "I": session?.key(.toggleInspector)
+        case "b", "B": session?.key(.togglePanel)
+        case "\u{1B}": session?.key(.escape)
         default: super.keyDown(with: event)
         }
     }

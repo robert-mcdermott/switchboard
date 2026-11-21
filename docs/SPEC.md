@@ -2,7 +2,7 @@
 
 A real-time network observatory for macOS. Every connection on the machine, who owns it, where it goes, and how hard it is working — drawn as a living graph that an operator can read at a glance and interrogate in seconds.
 
-**Status:** v0.4 draft, revised after M0, M1, and M2 · **Companions:** [ROADMAP.md](ROADMAP.md) · [M0 findings](spikes/M0-findings.md) · [M1 findings](spikes/M1-findings.md) · [M2 findings](spikes/M2-findings.md)
+**Status:** v0.4 draft, revised after M0, M1, and M2 · **Companions:** [ROADMAP.md](ROADMAP.md) · [M0 findings](spikes/M0-findings.md) · [M1 findings](spikes/M1-findings.md) · [M2 findings](spikes/M2-findings.md) · [M3 findings](spikes/M3-findings.md)
 
 ---
 
@@ -431,6 +431,8 @@ age>1h bytes_total<10KB
 ```
 
 Values understand units (`KB/s`, `MB`, `h`, `m`), globs, and CIDR. A bare word matches process, hostname, and address. The same AST evaluates in memory against live flows and compiles to SQL for the log. Fields and values autocomplete; filters can be saved.
+
+As built in M3: a filter that does not parse is reported and the last good filter stays in force, and a flow with no measurement for a field satisfies no comparison on it. Completion and saved filters are not built yet.
 
 ### 10.5 Time
 

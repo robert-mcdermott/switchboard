@@ -22,6 +22,7 @@ final class LiveFeed: @unchecked Sendable {
     private let controller: GraphController
     private let clock: @Sendable () -> Float
     private let onSummary: @Sendable (Summary) -> Void
+    private let onSnapshot: @Sendable (EngineSnapshot) -> Void
     private let lock = NSLock()
     private var running = false
     /// Synthetic or recorded traffic.
@@ -29,7 +30,8 @@ final class LiveFeed: @unchecked Sendable {
 
     init(
         spec: String, flows: Int?, controller: GraphController, clock: @escaping @Sendable () -> Float,
-        onSummary: @escaping @Sendable (Summary) -> Void
+        onSummary: @escaping @Sendable (Summary) -> Void,
+        onSnapshot: @escaping @Sendable (EngineSnapshot) -> Void
     ) throws {
         let resolved = try SourceSpec.make(spec, flows: flows)
         sources = resolved.sources
@@ -39,6 +41,7 @@ final class LiveFeed: @unchecked Sendable {
         self.controller = controller
         self.clock = clock
         self.onSummary = onSummary
+        self.onSnapshot = onSnapshot
     }
 
     func start() {
@@ -73,7 +76,10 @@ final class LiveFeed: @unchecked Sendable {
             for source in sources {
                 engine.ingest(source.poll(now: now), from: source.name, at: now)
             }
-            controller.update(engine.snapshot(), time: clock())
+            let snapshot = engine.snapshot()
+            controller.update(snapshot, time: clock())
+            // The tables and charts need the model too, but only once a second.
+            if tick % 4 == 0 { onSnapshot(snapshot) }
 
             if tick % 2 == 0 {
                 var summary = Summary()

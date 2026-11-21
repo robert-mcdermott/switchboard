@@ -136,6 +136,8 @@ M4 and M5 are independent of each other and can proceed in parallel once M3 clos
 
 **Exit:** usable all day on the dev Mac in Standalone mode; five-second test passed three times out of three.
 
+**Status: part one built.** The filter language, window layout, inspector, Connections table, four panels, focus mode, and context menu are done and tested (68 tests). The timeline scrubber, clustering, multi-select, filter completion, two panels, settings, palette validation, and the carried items remain for part two, and nothing has yet been driven by hand. Details in [spikes/M3-findings.md](spikes/M3-findings.md).
+
 ---
 
 ## M4 — Collector and Full mode
