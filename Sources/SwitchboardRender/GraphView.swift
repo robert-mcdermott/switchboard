@@ -473,9 +473,13 @@ final class GraphLayerView: NSView {
         let menu = NSMenu()
         var entries: [(String, Int)] = [("Filter to This", 0), ("Focus on This", 1), ("Copy Details", 2)]
         if case .node(.process) = target { entries.append(("Reveal in Finder", 3)) }
-        if case .node(.network) = target { entries.append(("Expand into Addresses", 4)) }
-        if case .node(.group) = target { entries.append(("Expand into Addresses", 4)) }
-        if case .node(.endpoint) = target { entries.append(("Collapse into Its Group", 4)) }
+        // Grouping is the constellation's; the other layouts arrange destinations their own way.
+        if session.controller.layout == .constellation {
+            if case .node(.network) = target { entries.append(("Expand into Addresses", 4)) }
+            if case .node(.group(.asn, _)) = target { entries.append(("Expand into Addresses", 4)) }
+            if case .node(.group(.country, _)) = target { entries.append(("Expand into Addresses", 4)) }
+            if case .node(.endpoint) = target { entries.append(("Collapse into Its Group", 4)) }
+        }
         for (title, tag) in entries {
             let item = NSMenuItem(title: title, action: #selector(contextChosen(_:)), keyEquivalent: "")
             item.target = self
