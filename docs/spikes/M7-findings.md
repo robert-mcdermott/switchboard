@@ -111,7 +111,7 @@ What that does not show: eight real hours of the app with a window, the GPU, Swi
 ## Not done, not verified
 
 - **Moving to another display** is untested: there was only one.
-- **Export and import of settings** have not been tried by hand, and have no automated test, because the app target has none.
+- **Export and import of settings** have not been tried by hand. (Tests for them were added in M8.)
 - **Saving, replacing, and deleting a workspace** through the menu have not been tried by hand. Applying a built-in one from the command line has.
 - **The kiosk caption** (the name and totals, top left) did not appear in the one capture taken. It may be hidden behind the menu-bar area in full screen; I have not seen it on screen.
 - **Hiding the pointer and keeping the display awake** in kiosk mode are written and unobserved.

@@ -96,4 +96,4 @@ The log grew about 57 MB an hour. The soak's log held 218,566 connections after 
 
 ## Tests
 
-199 pass. Seven golden images match.
+204 pass. Seven golden images match. The app target now has tests of its own: workspaces (the three defaults, replacing and restoring them, a damaged list) and settings export and import (a round trip, and a file that tries to set anything other than Switchboard's own settings).

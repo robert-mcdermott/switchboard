@@ -82,5 +82,9 @@ let package = Package(
             name: "SwitchboardRenderTests",
             dependencies: ["SwitchboardRender", "SwitchboardCore"]
         ),
+        .testTarget(
+            name: "SwitchboardAppTests",
+            dependencies: ["SwitchboardApp", "SwitchboardCore"]
+        ),
     ]
 )
