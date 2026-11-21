@@ -219,6 +219,14 @@ final class AppModel {
     /// Ended connections stay on the graph, subdued, instead of fading away.
     private(set) var keepEnded = UserDefaults.standard.bool(forKey: "keepEnded")
     private(set) var endedCount = 0
+    /// How the connections are arranged.
+    var layout = GraphLayout.constellation
+    /// Full screen with nothing but the graph.
+    var kiosk = false
+    var workspaces = WorkspaceStore.all()
+    var activeWorkspace: String?
+    @ObservationIgnored var enteredFullScreenForKiosk = false
+    @ObservationIgnored var wakeLock: NSObjectProtocol?
 
     // Time: `nil` means the present.
     private(set) var scrubTime: EngineTime?
@@ -285,6 +293,9 @@ final class AppModel {
     @ObservationIgnored private var scrubRequest: Double?
     @ObservationIgnored private var logMomentRequest: Double?
     @ObservationIgnored private var derivation = 0
+    @ObservationIgnored private var startupWorkspace: String?
+    @ObservationIgnored private var startupKiosk = false
+    @ObservationIgnored private var startupDisplay: Int?
     @ObservationIgnored private var loadedTags = ""
     @ObservationIgnored private var enrichmentLoaded = false
     @ObservationIgnored private var store: LogStore?
@@ -331,12 +342,22 @@ final class AppModel {
             case .focusFilter: filterFocusRequests += 1
             case .toggleInspector: showInspector.toggle()
             case .togglePanel: showPanel.toggle()
-            case .escape: focused = false
+            case .escape:
+                if kiosk { setKiosk(false) } else { focused = false }
             case .toggleKeepEnded: setKeepEnded(!keepEnded)
+            case .layout(let number):
+                if GraphLayout.allCases.indices.contains(number - 1) { setLayout(GraphLayout.allCases[number - 1]) }
+            case .toggleKiosk: setKiosk(!kiosk)
             }
         }
         applySettings()
         if arguments.contains("--keep-ended") { keepEnded = true }
+        layout = value("--layout").flatMap(GraphLayout.init(rawValue:))
+            ?? UserDefaults.standard.string(forKey: "layout").flatMap(GraphLayout.init(rawValue:)) ?? .constellation
+        controller.layout = layout
+        startupWorkspace = value("--workspace")
+        startupKiosk = arguments.contains("--kiosk")
+        startupDisplay = value("--display").flatMap(Int.init)
         controller.keepsEnded = keepEnded
 
         do {
@@ -448,6 +469,23 @@ final class AppModel {
         loadEnrichment()
         let minutes = defaults.object(forKey: "historyMinutes") as? Double ?? 15
         window.maximumAge = max(minutes, 1) * 60
+        session.controller.lanesWindow = max(defaults.object(forKey: "lanesMinutes") as? Double ?? 10, 0.5) * 60
+    }
+
+    /// What the command line asked for that needs the window to exist first.
+    func applyStartupArrangement() {
+        if let number = startupDisplay { moveToDisplay(number) }
+        if let name = startupWorkspace {
+            if let workspace = workspaces.first(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }) {
+                apply(workspace)
+            } else {
+                failure = "No workspace named \(name). There are: \(workspaces.map(\.name).joined(separator: ", "))"
+            }
+        }
+        if startupKiosk { setKiosk(true) }
+        startupWorkspace = nil
+        startupKiosk = false
+        startupDisplay = nil
     }
 
     private func applyClustering(_ mode: String, threshold: Int) {
@@ -544,6 +582,11 @@ final class AppModel {
         case .node(.network(let address, let bits)): "remote:\(address)/\(bits)"
         case .node(.group(.asn, let key)): "asn=\(key)"
         case .node(.group(.country, let key)): "country=\(key)"
+        case .node(.group(.domain, let key)): "host:*\(key)"
+        case .node(.service(let name)): "service=\"\(name)\""
+        case .edge(.process(let pid), .service(let name)): "pid=\(pid) service=\"\(name)\""
+        case .edge(.service(let name), .group(.asn, let key)): "service=\"\(name)\" asn=\(key)"
+        case .edge(.service(let name), .group(.domain, let key)): "service=\"\(name)\" host:*\(key)"
         case .edge(.process(let pid), .group(.asn, let key)): "pid=\(pid) asn=\(key)"
         case .edge(.process(let pid), .group(.country, let key)): "pid=\(pid) country=\(key)"
         case .edge(.process(let from), .process): "pid=\(from) remote:127.0.0.0/8"
@@ -1067,6 +1110,11 @@ final class AppModel {
             "version": Switchboard.version,
             "source": sourceSpec,
             "profile": profile.rawValue,
+            "layout": layout.rawValue,
+            "kiosk": kiosk,
+            "workspace": activeWorkspace ?? "",
+            "workspaces": workspaces.map(\.name),
+            "fullScreen": mainWindow?.styleMask.contains(.fullScreen) ?? false,
             "device": session.rendererInfo?.deviceName ?? "",
             "resourceOrigin": session.rendererInfo?.resourceOrigin.rawValue ?? "",
             "shaderCompileMS": session.rendererInfo?.shaderCompileMS ?? -1,

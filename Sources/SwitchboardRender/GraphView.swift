@@ -12,8 +12,11 @@ public final class GraphSession: NSObject, MTKViewDelegate {
         public var resourceOrigin: RenderResources.Origin
     }
 
-    public enum Key: Sendable {
+    public enum Key: Sendable, Equatable {
         case togglePause, cycleProfile, resetView, focusFilter, toggleInspector, togglePanel, escape, toggleKeepEnded
+        /// 1 for the first layout, 2 for the second, and so on.
+        case layout(Int)
+        case toggleKiosk
     }
 
     public enum ContextAction: Sendable {
@@ -52,7 +55,7 @@ public final class GraphSession: NSObject, MTKViewDelegate {
 
     private var userZoom: Float = 1
     private var pan: SIMD2<Float> = .zero
-    private var extent: Float = 420
+    private var halfSize = SIMD2<Float>(420, 420)
     private var hoverTarget: PickTarget?
     private var hoverPoint: CGPoint = .zero
     private var framesSinceHoverRefresh = 0
@@ -101,7 +104,7 @@ public final class GraphSession: NSObject, MTKViewDelegate {
         if firstDataFrame == nil, !frame.edges.isEmpty { firstDataFrame = Date() }
 
         // Ease toward the layout's size so the view does not jump as the graph grows.
-        extent += (frame.extent - extent) * 0.08
+        halfSize += (frame.halfSize - halfSize) * 0.08
         let camera = camera(for: view)
         let backing = Float(view.window?.backingScaleFactor ?? 2)
         renderer.render(frame, camera: camera, time: time, backing: backing, to: drawable.texture, commandBuffer: commandBuffer)
@@ -142,7 +145,7 @@ public final class GraphSession: NSObject, MTKViewDelegate {
     private func camera(for view: MTKView) -> Camera {
         let size = view.drawableSize
         let viewport = SIMD2(Float(size.width), Float(size.height))
-        return Camera(center: pan, scale: Camera.fitting(extent: extent, viewport: viewport) * userZoom)
+        return Camera(center: pan, scale: Camera.fitting(halfSize: halfSize, viewport: viewport) * userZoom)
     }
 
     // MARK: - Input
@@ -330,6 +333,10 @@ final class GraphMTKView: MTKView {
         case "i", "I": session?.key(.toggleInspector)
         case "e", "E": session?.key(.toggleKeepEnded)
         case "b", "B": session?.key(.togglePanel)
+        case "1": session?.key(.layout(1))
+        case "2": session?.key(.layout(2))
+        case "3": session?.key(.layout(3))
+        case "k", "K": session?.key(.toggleKiosk)
         case "\u{1B}": session?.key(.escape)
         default: super.keyDown(with: event)
         }

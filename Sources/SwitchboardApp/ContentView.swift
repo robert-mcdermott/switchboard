@@ -7,26 +7,43 @@ struct ContentView: View {
     @Bindable var model: AppModel
 
     var body: some View {
-        VStack(spacing: 0) {
-            TopBar(model: model)
-            Rectangle().fill(Color.hairline).frame(height: 1)
-            HSplitView {
-                VSplitView {
-                    graph.frame(minWidth: 480, minHeight: 260)
-                    if model.showPanel {
-                        BottomPanel(model: model).frame(minHeight: 150, idealHeight: 250, maxHeight: 520)
-                    }
+        Group {
+            if model.kiosk {
+                // On the wall: the graph and nothing else.
+                ZStack(alignment: .topLeading) {
+                    GraphView(session: model.session)
+                    KioskCaption(model: model)
                 }
-                if model.showInspector {
-                    InspectorView(model: model).frame(minWidth: 280, idealWidth: 330, maxWidth: 460)
+                .ignoresSafeArea()
+            } else {
+                VStack(spacing: 0) {
+                    TopBar(model: model)
+                    Rectangle().fill(Color.hairline).frame(height: 1)
+                    HSplitView {
+                        VSplitView {
+                            graph.frame(minWidth: 480, minHeight: 260)
+                            if model.showPanel {
+                                BottomPanel(model: model).frame(minHeight: 150, idealHeight: 250, maxHeight: 520)
+                            }
+                        }
+                        if model.showInspector {
+                            InspectorView(model: model).frame(minWidth: 280, idealWidth: 330, maxWidth: 460)
+                        }
+                    }
                 }
             }
         }
         .background(Color.field)
         .task {
+            // The window has to exist before it can be moved or made full screen.
+            try? await Task.sleep(for: .milliseconds(400))
+            model.applyStartupArrangement()
+        }
+        .task {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(500))
                 model.refresh()
+                if model.kiosk { NSCursor.setHiddenUntilMouseMoves(true) }
             }
         }
         .task {
@@ -73,6 +90,21 @@ struct ContentView: View {
         }
         model.writeMeasurement(to: path, measured: measured)
         NSApplication.shared.terminate(nil)
+    }
+}
+
+/// The one line of text a wall display carries: what this is, and the totals.
+private struct KioskCaption: View {
+    let model: AppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("SWITCHBOARD").font(.mono(11, .semibold)).kerning(2.2).foregroundStyle(Color.signal)
+            Text(model.statusLine).font(.mono(11)).foregroundStyle(Color.readout)
+            if let failure = model.failure { Text(failure).font(.mono(11)).foregroundStyle(Color.attention) }
+        }
+        .padding(18)
+        .allowsHitTesting(false)
     }
 }
 
@@ -293,6 +325,16 @@ struct TopBar: View {
                 .font(.mono(11))
                 .foregroundStyle(Color.readout)
                 .lineLimit(1)
+
+            Picker("Layout", selection: Binding(get: { model.layout }, set: { model.setLayout($0) })) {
+                Image(systemName: "circle.hexagongrid").tag(GraphLayout.constellation).help("Constellation (1)")
+                Image(systemName: "arrow.triangle.branch").tag(GraphLayout.flow).help("Flow: processes, services, owners (2)")
+                Image(systemName: "chart.bar.doc.horizontal").tag(GraphLayout.lanes).help("Lanes: each connection over time (3)")
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 110)
+            .help("How the connections are arranged: constellation (1), flow (2), lanes over time (3)")
 
             Picker("Profile", selection: Binding(get: { model.profile }, set: { model.setProfile($0) })) {
                 ForEach(RenderProfile.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }

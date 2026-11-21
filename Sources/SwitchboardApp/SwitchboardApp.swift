@@ -13,6 +13,33 @@ struct SwitchboardApp: App {
                 .tint(Color(red: 0.13, green: 0.55, blue: 0.68))
         }
         .defaultSize(width: 1440, height: 900)
+        .commands {
+            CommandMenu("Workspace") {
+                ForEach(Array(GraphLayout.allCases.enumerated()), id: \.element) { offset, layout in
+                    Button(layout.rawValue.capitalized) { model.setLayout(layout) }
+                        .keyboardShortcut(KeyEquivalent(Character("\(offset + 1)")), modifiers: .command)
+                }
+                Divider()
+                ForEach(model.workspaces) { workspace in
+                    Button((model.activeWorkspace == workspace.name ? "✓ " : "") + workspace.name) { model.apply(workspace) }
+                }
+                Divider()
+                Button("Save Current as Workspace…") { model.promptToSaveWorkspace() }
+                if let active = model.activeWorkspace, WorkspaceStore.saved().contains(where: { $0.name == active }) {
+                    Button(Workspace.builtIn.contains { $0.name == active } ? "Restore “\(active)” to Default" : "Delete “\(active)”") {
+                        model.deleteWorkspace(named: active)
+                    }
+                }
+                Divider()
+                Button(model.kiosk ? "Leave Kiosk Mode" : "Enter Kiosk Mode") { model.setKiosk(!model.kiosk) }
+                    .keyboardShortcut("k", modifiers: [.command, .control])
+                Button("Move to Next Display") { model.moveToDisplay() }
+                    .keyboardShortcut("d", modifiers: [.command, .control])
+                Divider()
+                Button("Export Settings…") { model.exportConfiguration() }
+                Button("Import Settings…") { model.importConfiguration() }
+            }
+        }
 
         MenuBarExtra("Switchboard", systemImage: "point.3.connected.trianglepath.dotted") {
             Text("Switchboard \(Switchboard.version)")
@@ -45,6 +72,7 @@ struct SettingsView: View {
     @AppStorage("hostnames") private var hostnames = "passive"
     @AppStorage("logging") private var logging = true
     @AppStorage("tagLists") private var tagLists = ""
+    @AppStorage("lanesMinutes") private var lanesMinutes = 10.0
     @AppStorage("logDetail") private var logDetail = "standard"
     @AppStorage("logDays") private var logDays = 30.0
     @AppStorage("logMegabytes") private var logMegabytes = 2000.0
@@ -98,6 +126,18 @@ struct SettingsView: View {
             }
             Section("Location and network owner") {
                 Text("Country, city, and network owner come from database files in\n~/Library/Application Support/Switchboard/GeoIP. Switchboard never downloads them; run scripts/fetch-geoip.sh to fetch the free DB-IP Lite databases (IP Geolocation by DB-IP, CC BY 4.0), then restart.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section("Lanes layout") {
+                Picker("Time shown", selection: $lanesMinutes) {
+                    Text("1 minute").tag(1.0)
+                    Text("5 minutes").tag(5.0)
+                    Text("10 minutes").tag(10.0)
+                    Text("30 minutes").tag(30.0)
+                    Text("1 hour").tag(60.0)
+                }
+                Text("Connections that ended before Switchboard was showing the lanes are not drawn unless “keep ended connections” is on.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

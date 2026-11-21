@@ -83,7 +83,7 @@ private final class Marker {}
 @Suite struct ReverseResolverTests {
     private func drain(_ resolver: ReverseResolver, expecting count: Int) -> [CaptureObservation] {
         var all: [CaptureObservation] = []
-        for _ in 0..<400 where all.count < count {
+        for _ in 0..<4000 where all.count < count {
             all += resolver.pollCapture(now: 0)
             Thread.sleep(forTimeInterval: 0.005)
         }

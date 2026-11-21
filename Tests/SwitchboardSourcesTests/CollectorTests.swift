@@ -63,6 +63,12 @@ import Testing
         }
 
         let open = reference.flows.values.filter { $0.state != .closed }
+        // The last tick may still be crossing the socket: the wait above ends on the first
+        // bytes to arrive, which can be the tail of the tick before. Take in what is left.
+        _ = Self.wait(2) {
+            for (name, events) in client.pollBatches() { engine.ingest(events, from: name, at: time - 0.25) }
+            return Set(engine.flows.values.filter { $0.state != .closed }.map(\.key)) == Set(open.map(\.key))
+        }
         let mirrored = engine.flows.values.filter { $0.state != .closed }
         #expect(open.count > 100)
         #expect(Set(mirrored.map(\.key)) == Set(open.map(\.key)))

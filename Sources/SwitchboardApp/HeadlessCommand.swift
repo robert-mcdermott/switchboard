@@ -55,6 +55,14 @@ enum HeadlessCommand {
             }
             let engine = FlowEngine(resolver: SourceSpec.resolver(for: resolved))
             let controller = GraphController()
+            if let layout = value("--layout") {
+                guard let chosen = GraphLayout(rawValue: layout) else {
+                    print("--layout must be one of: \(GraphLayout.allCases.map(\.rawValue).joined(separator: ", "))")
+                    return 2
+                }
+                controller.layout = chosen
+                controller.lanesWindow = value("--lanes-window").flatMap(Double.init) ?? 60
+            }
             // Same ticks, same times, same picture, every run.
             SteppedRun.run(sources: resolved.sources, engine: engine, until: at) { time in
                 controller.update(engine.snapshot(), time: Float(time))

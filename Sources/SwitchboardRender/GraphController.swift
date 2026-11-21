@@ -10,6 +10,20 @@ public enum NodeID: Hashable, Sendable {
     case network(IPAddress, bits: Int)
     /// Destinations grouped by who owns their network, or by country.
     case group(GroupKind, String)
+    /// What the traffic is, as a column of its own in the flow layout.
+    case service(String)
+    /// A mark on an axis. Never picked.
+    case marker(Int)
+}
+
+/// How the same connections are arranged on screen (docs/SPEC.md §10.2).
+public enum GraphLayout: String, Sendable, CaseIterable {
+    /// This Mac in the middle, processes around it, destinations beyond.
+    case constellation
+    /// Left to right by volume: this Mac, processes, services, who owns the far end.
+    case flow
+    /// One row per process, time running left to right, a bar for each connection.
+    case lanes
 }
 
 public enum GroupKind: String, Hashable, Sendable {
@@ -17,6 +31,10 @@ public enum GroupKind: String, Hashable, Sendable {
     case asn
     /// Keyed by two-letter country code.
     case country
+    /// Keyed by the registered part of a hostname, such as `example.com`.
+    case domain
+    /// Everything too small to have a node of its own.
+    case rest
 }
 
 public enum PickTarget: Hashable, Sendable {
@@ -75,6 +93,9 @@ public struct LabelRequest: Sendable {
     public var node: Int
     /// 0 host, 1 process, 2 endpoint.
     public var kind: Int
+    /// Where the text sits: -1 ends at the node, 1 starts at it, 0 is centred beneath.
+    /// `nil` pushes it outward from the centre of the view.
+    public var side: Int?
 }
 
 /// Everything the renderer needs for one frame.
@@ -86,6 +107,8 @@ public struct RenderFrame: Sendable {
     public var icons: [(node: Int, path: String)] = []
     /// Radius of the layout, in world units.
     public var extent: Float = 600
+    /// Half the width and height the layout needs, in world units.
+    public var halfSize = SIMD2<Float>(600, 600)
 }
 
 /// Holds the graph: turns engine snapshots into nodes and edges, lays them out, and
@@ -97,7 +120,7 @@ public struct RenderFrame: Sendable {
 ///
 /// Thread-safe: the engine thread calls `update`, the main thread everything else.
 public final class GraphController: @unchecked Sendable {
-    private struct Node {
+    struct Node {
         var id: NodeID
         var position: SIMD2<Float>
         var anchor: SIMD2<Float>
@@ -109,9 +132,24 @@ public final class GraphController: @unchecked Sendable {
         var label: String
         var priority: Double
         var iconPath: String?
+        var labelSide: Int?
     }
 
-    private struct Edge {
+    /// A line that joins no nodes: one connection's lifetime in the lanes layout, or a rule.
+    struct Bar {
+        var from: SIMD2<Float>
+        var to: SIMD2<Float>
+        var target: PickTarget?
+        var pid: Int32 = -1
+        var halfWidth: Float
+        var glow: Float
+        var pulse: Float = 0
+        var speed: Float = 0.3
+        var color: SIMD3<Float>
+        var phase: Float = 0
+    }
+
+    struct Edge {
         /// Node indexes. Pulses travel from `from` to `to`.
         var from: Int
         var to: Int
@@ -134,12 +172,12 @@ public final class GraphController: @unchecked Sendable {
         }
     }
 
-    private struct EdgeKey: Hashable {
+    struct EdgeKey: Hashable {
         var from: NodeID
         var to: NodeID
     }
 
-    private struct Aggregate {
+    struct Aggregate {
         var rateIn = 0.0
         var rateOut = 0.0
         var bytesIn: UInt64 = 0
@@ -197,12 +235,20 @@ public final class GraphController: @unchecked Sendable {
     private let hostLabel: String
     private var nodes: [Node] = []
     private var edges: [Edge] = []
+    private var bars: [Bar] = []
+    private var halfSize: SIMD2<Float>?
+    private var layoutMode = GraphLayout.constellation
     private var index: [NodeID: Int] = [:]
     private var settled = false
     private var arrivals: [NodeID: (bornAt: Float, lastSeen: Float)] = [:]
     private var extent: Float = 420
     /// Nodes are stored host first, then this many processes, then destinations.
     private var processCount = 0
+    /// In the flow layout a connection is found on its destination's node, not on an edge.
+    private var layoutTargetsNodes = false
+    /// Only the constellation needs nodes pushed apart. In a column, two nodes changing
+    /// places would block each other for ever.
+    private var nodesCollide = true
 
     // Kept from the last rebuild for tooltips and the inspector.
     private var nodeAggregates: [NodeID: Aggregate] = [:]
@@ -225,6 +271,7 @@ public final class GraphController: @unchecked Sendable {
     private var expanded = Set<NodeID>()
     private var scheme = PaletteScheme.standard
     private var keepEnded = false
+    private var lanesSeconds = 600.0
     private var showNames = true
     private var tagColors: [String: SIMD3<Float>] = [:]
     /// Destinations the log had never seen before, and the animation time each was noticed.
@@ -282,6 +329,25 @@ public final class GraphController: @unchecked Sendable {
     public var clustering: Clustering {
         get { lock.withLock { clusteringMode } }
         set { change { clusteringMode = newValue } }
+    }
+
+    /// Which arrangement is drawn. Nodes keep their identity across a change and glide to
+    /// their new places, so what was selected stays selected.
+    public var layout: GraphLayout {
+        get { lock.withLock { layoutMode } }
+        set {
+            change {
+                // What the lanes remembered on their own account goes when they do.
+                if layoutMode == .lanes, newValue != .lanes, !keepEnded { ended.removeAll() }
+                layoutMode = newValue
+            }
+        }
+    }
+
+    /// How much time the lanes layout shows, in seconds.
+    public var lanesWindow: Double {
+        get { lock.withLock { lanesSeconds } }
+        set { change { lanesSeconds = max(30, newValue) } }
     }
 
     public var palette: PaletteScheme {
@@ -383,7 +449,7 @@ public final class GraphController: @unchecked Sendable {
 
     // MARK: - Building the scene
 
-    private struct AddressEdge: Hashable {
+    struct AddressEdge: Hashable {
         var pid: Int32
         var address: IPAddress
     }
@@ -409,7 +475,11 @@ public final class GraphController: @unchecked Sendable {
         let expanded = self.expanded
         let scheme = self.scheme
         var arrivals = self.arrivals
-        let keepEnded = self.keepEnded
+        let layoutMode = self.layoutMode
+        let lanesSeconds = self.lanesSeconds
+        // The lanes are a history, so they remember what has ended whether or not the mode is on.
+        let keepEnded = self.keepEnded || layoutMode == .lanes
+        let fadeEnded = !self.keepEnded
         let showNames = self.showNames
         let tagColors = self.tagColors
         let novel = self.novel.filter { time - $0.value < Self.novelSeconds }
@@ -438,6 +508,11 @@ public final class GraphController: @unchecked Sendable {
             for flow in snapshot.flows {
                 present.insert(flow.id)
                 if flow.state == .closed { ended[flow.id] = (flow, processes[flow.pid]) }
+            }
+            // Kept only for the lanes: what has slid off their left-hand side is no use to them.
+            if fadeEnded {
+                let oldest = snapshot.time - lanesSeconds
+                ended = ended.filter { ($0.value.flow.closedAt ?? snapshot.time) >= oldest }
             }
             if ended.count > Self.endedLimit {
                 let oldest = ended.values.sorted { ($0.flow.closedAt ?? 0, $0.flow.id) < ($1.flow.closedAt ?? 0, $1.flow.id) }
@@ -543,6 +618,33 @@ public final class GraphController: @unchecked Sendable {
         }
 
         var built: [Node] = []
+        var lookup: [NodeID: Int] = [:]
+        var drawn: [Edge] = []
+        var bars: [Bar] = []
+        var farthest: Float = 0
+        var halfSize: SIMD2<Float>?
+        var extraNodes: [NodeID: Aggregate] = [:]
+        var extraEdges: [EdgeKey: Aggregate] = [:]
+        var shownProcesses = byProcess.count
+        if layoutMode != .constellation {
+            let input = LayoutInput(
+                byProcess: byProcess, byAddressEdge: byAddressEdge, links: links, nodeFor: nodeFor, processes: processes,
+                listeners: listeners, scheme: scheme, previous: previous, hostLabel: hostLabel, now: snapshot.time,
+                window: lanesSeconds, tagColors: tagColors)
+            let scene = layoutMode == .flow ? Self.flowScene(input, born: born) : Self.lanesScene(input, born: born)
+            built = scene.nodes
+            drawn = scene.edges
+            bars = scene.bars
+            halfSize = scene.halfSize
+            farthest = max(scene.halfSize.x, scene.halfSize.y) - 90
+            extraNodes = scene.nodeAggregates
+            extraEdges = scene.edgeAggregates
+            shownProcesses = scene.processCount
+            for (id, addresses) in scene.members { members[id] = addresses }
+            for (id, label) in scene.labels { groupLabels[id] = label }
+            if layoutMode == .flow { nodeFor = scene.nodeFor }
+            for (offset, node) in built.enumerated() { lookup[node.id] = offset }
+        } else {
         built.reserveCapacity(byProcess.count + remotes.count + 1)
 
         // This Mac, at the centre.
@@ -598,7 +700,7 @@ public final class GraphController: @unchecked Sendable {
         var owned: [Int32: Int] = [:]
         for entry in owner.values { owned[entry.pid, default: 0] += 1 }
 
-        var farthest = ringRadius
+        farthest = ringRadius
         for id in remotes.keys.sorted(by: Self.remoteOrder) {
             let aggregate = remotes[id]!
             guard let ownerPID = owner[id]?.pid else { continue }
@@ -642,11 +744,9 @@ public final class GraphController: @unchecked Sendable {
             built.append(node)
         }
 
-        var lookup: [NodeID: Int] = [:]
         lookup.reserveCapacity(built.count)
         for (offset, node) in built.enumerated() { lookup[node.id] = offset }
 
-        var drawn: [Edge] = []
         drawn.reserveCapacity(links.count + pids.count + peers.count)
         for pid in pids {
             guard let to = lookup[.process(pid)], let aggregate = byProcess[pid] else { continue }
@@ -690,9 +790,12 @@ public final class GraphController: @unchecked Sendable {
             drawn.append(edge)
         }
 
+        }
+
         var aggregates = remotes
         for (pid, aggregate) in byProcess { aggregates[.process(pid)] = aggregate }
-        let allEdges = links.merging(peers) { first, _ in first }
+        for (id, aggregate) in extraNodes { aggregates[id] = aggregate }
+        let allEdges = links.merging(peers) { first, _ in first }.merging(extraEdges) { first, _ in first }
         let remembered = arrivals.filter { time - $0.value.lastSeen < 60 }
 
         lock.lock()
@@ -710,19 +813,23 @@ public final class GraphController: @unchecked Sendable {
         networkMembers = members
         self.groupLabels = groupLabels
         nodeForAddress = nodeFor
-        processCount = pids.count
+        processCount = shownProcesses
         self.arrivals = remembered
         self.novel = self.novel.filter { time - $0.value < Self.novelSeconds }
         // Unless the mode was switched off while this was being worked out.
-        if self.keepEnded { self.ended = ended }
+        if self.keepEnded || self.layoutMode == .lanes { self.ended = ended }
         nodes = built
         edges = drawn
+        self.bars = bars
+        self.halfSize = halfSize
+        layoutTargetsNodes = layoutMode == .flow
+        nodesCollide = layoutMode == .constellation
         index = lookup
         extent = farthest + 90
         settled = false
     }
 
-    private static func edge(
+    static func edge(
         from: Int, to: Int, target: PickTarget, aggregate: Aggregate, color: SIMD3<Float>, seed: String,
         bend: Float, outbound: Bool, trunk: Bool, dimming: Float = 1
     ) -> Edge {
@@ -740,7 +847,7 @@ public final class GraphController: @unchecked Sendable {
 
     /// A stable order for nodes: processes by pid, destinations by address, a single
     /// address before the network that contains it.
-    private static func remoteOrder(_ a: NodeID, _ b: NodeID) -> Bool {
+    static func remoteOrder(_ a: NodeID, _ b: NodeID) -> Bool {
         func key(_ id: NodeID) -> (Int, Int, UInt64, UInt64, Int) {
             switch id {
             case .host: return (0, 0, 0, 0, 0)
@@ -750,6 +857,11 @@ public final class GraphController: @unchecked Sendable {
                 var hash: UInt64 = 0xcbf2_9ce4_8422_2325
                 for byte in "\(kind.rawValue) \(key)".utf8 { hash = (hash ^ UInt64(byte)) &* 0x100_0000_01b3 }
                 return (3, 0, 0, hash, 0)
+            case .service(let name):
+                var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+                for byte in name.utf8 { hash = (hash ^ UInt64(byte)) &* 0x100_0000_01b3 }
+                return (4, 0, 0, hash, 0)
+            case .marker(let number): return (5, 0, 0, UInt64(number), 0)
             case .endpoint(let address), .network(let address, _):
                 let isNetwork: Int
                 if case .network = id { isNetwork = 1 } else { isNetwork = 0 }
@@ -782,7 +894,7 @@ public final class GraphController: @unchecked Sendable {
             buckets[SIMD2(Int32((position.x / cell).rounded(.down)), Int32((position.y / cell).rounded(.down))), default: []]
                 .append(offset)
         }
-        for (key, members) in buckets {
+        for (key, members) in buckets where nodesCollide {
             for dx in Int32(0)...1 {
                 for dy in Int32(-1)...1 where dx == 1 || dy >= 0 {
                     let same = dx == 0 && dy == 0
@@ -804,7 +916,8 @@ public final class GraphController: @unchecked Sendable {
             }
         }
 
-        for offset in nodes.indices.dropFirst() {
+        // This Mac is never pushed, but it does travel when a layout puts it somewhere else.
+        for offset in nodes.indices {
             let change = (nodes[offset].anchor - nodes[offset].position) * 0.09 + push[offset] * 0.45
             nodes[offset].position += change
             moved = max(moved, simd_length(change))
@@ -830,6 +943,7 @@ public final class GraphController: @unchecked Sendable {
         defer { lock.unlock() }
         var frame = RenderFrame()
         frame.extent = extent
+        frame.halfSize = halfSize ?? SIMD2(extent, extent)
         frame.nodes.reserveCapacity(nodes.count)
         frame.edges.reserveCapacity(edges.count)
 
@@ -886,15 +1000,34 @@ public final class GraphController: @unchecked Sendable {
                 color: SIMD4(edge.color, 1), speed: edge.speed, density: edge.density, glow: glow, pulse: pulse))
         }
 
+        for bar in bars {
+            var glow = bar.glow
+            var halfWidth = bar.halfWidth
+            if let target = bar.target, !highlights.isEmpty {
+                if highlights.contains(target) || highlights.contains(.node(.process(bar.pid))) {
+                    glow = glow * 1.8 + 0.22
+                    halfWidth += 0.6
+                } else {
+                    glow *= 0.45
+                }
+            }
+            if let focusTarget, let target = bar.target, target != focusTarget, focusTarget != .node(.process(bar.pid)) { glow *= 0.1 }
+            frame.edges.append(EdgeInstance(
+                p0: bar.from, p1: bar.to, control: (bar.from + bar.to) * 0.5, halfWidth: halfWidth, phase: bar.phase,
+                color: SIMD4(bar.color, 1), speed: bar.speed, density: 1, glow: glow, pulse: bar.pulse))
+        }
+
         // The host and every process are named; destinations compete for the remaining labels.
-        if !nodes.isEmpty { frame.labels.append(LabelRequest(text: nodes[0].label, node: 0, kind: 0)) }
+        if !nodes.isEmpty { frame.labels.append(LabelRequest(text: nodes[0].label, node: 0, kind: 0, side: nodes[0].labelSide)) }
         let named = (1..<min(processCount + 1, nodes.count)).sorted { nodes[$0].priority > nodes[$1].priority }
         for offset in named.prefix(160) where inFocus?.contains(offset) ?? true {
-            frame.labels.append(LabelRequest(text: nodes[offset].label, node: offset, kind: 1))
+            frame.labels.append(LabelRequest(text: nodes[offset].label, node: offset, kind: 1, side: nodes[offset].labelSide))
         }
         let destinations = nodes.indices.dropFirst(processCount + 1)
+        // A column or an axis is short enough to label in full; only the constellation has to choose.
+        let budget = nodesCollide || labelBudget == 0 ? labelBudget : max(labelBudget, 400)
         var chosen = destinations.filter { nodes[$0].priority > 1 && (inFocus?.contains($0) ?? true) }
-            .sorted { nodes[$0].priority > nodes[$1].priority }.prefix(labelBudget).map { $0 }
+            .sorted { nodes[$0].priority > nodes[$1].priority }.prefix(budget).map { $0 }
         for highlight in highlights {
             let far: NodeID?
             switch highlight {
@@ -904,7 +1037,7 @@ public final class GraphController: @unchecked Sendable {
             if let far, let offset = index[far], offset > processCount, !chosen.contains(offset) { chosen.append(offset) }
         }
         for offset in chosen {
-            frame.labels.append(LabelRequest(text: nodes[offset].label, node: offset, kind: 2))
+            frame.labels.append(LabelRequest(text: nodes[offset].label, node: offset, kind: 2, side: nodes[offset].labelSide))
         }
         return frame
     }
@@ -954,7 +1087,8 @@ public final class GraphController: @unchecked Sendable {
             }
             return peer.map { .edge($0.from, $0.to) } ?? .node(.process(pid))
         }
-        return .edge(.process(pid), nodeForAddress[remote.address] ?? .endpoint(remote.address))
+        let far = nodeForAddress[remote.address] ?? .endpoint(remote.address)
+        return layoutTargetsNodes ? .node(far) : .edge(.process(pid), far)
     }
 
     // MARK: - Picking
@@ -965,6 +1099,7 @@ public final class GraphController: @unchecked Sendable {
         defer { lock.unlock() }
         var best: (target: PickTarget, distance: Float)?
         for node in nodes {
+            if case .marker = node.id { continue }
             let distance = simd_distance(node.position, point)
             if distance <= node.radius + slack, distance < (best?.distance ?? .infinity) {
                 best = (.node(node.id), distance)
@@ -987,10 +1122,15 @@ public final class GraphController: @unchecked Sendable {
                 best = (edge.target, nearest)
             }
         }
+        for bar in bars {
+            guard let target = bar.target else { continue }
+            let nearest = Self.distance(from: point, toSegment: bar.from, bar.to)
+            if nearest <= max(bar.halfWidth, slack), nearest < (best?.distance ?? .infinity) { best = (target, nearest) }
+        }
         return best?.target
     }
 
-    private static func distance(from point: SIMD2<Float>, toSegment a: SIMD2<Float>, _ b: SIMD2<Float>) -> Float {
+    static func distance(from point: SIMD2<Float>, toSegment a: SIMD2<Float>, _ b: SIMD2<Float>) -> Float {
         let ab = b - a
         let lengthSquared = simd_length_squared(ab)
         guard lengthSquared > 1e-9 else { return simd_distance(point, a) }
@@ -1053,8 +1193,25 @@ public final class GraphController: @unchecked Sendable {
             rows.insert(contentsOf: nameRows(aggregate), at: 2)
             return HoverInfo(
                 title: groupLabels[id] ?? key,
-                subtitle: "\(addresses.count) addresses · grouped by \(kind == .asn ? "network owner" : "country")",
-                rows: rows, footnote: "Right-click to expand into separate addresses")
+                subtitle: "\(addresses.count) addresses · grouped by \(Self.groupName(kind))",
+                rows: rows, footnote: layoutMode == .constellation ? "Right-click to expand into separate addresses" : nil)
+
+        case .node(.service(let service)):
+            let users = Set(aggregate.flows.map(\.pid)).sorted().map(name)
+            var rows = trafficRows(aggregate)
+            rows.insert(.init(label: "Used by", value: Self.list(users)), at: 0)
+            return HoverInfo(title: service, subtitle: "\(aggregate.total) connections carrying it", rows: rows, footnote: nil)
+
+        case .edge(let from, .service(let service)):
+            let near: String
+            if case .process(let pid) = from { near = name(pid) } else { near = groupLabels[from] ?? "other processes" }
+            return HoverInfo(title: "\(near) → \(service)", subtitle: "\(aggregate.total) connections", rows: trafficRows(aggregate), footnote: nil)
+
+        case .edge(.service(let service), let to):
+            var rows = trafficRows(aggregate)
+            rows.insert(.init(label: "Used by", value: Self.list(Set(aggregate.flows.map(\.pid)).sorted().map(name))), at: 0)
+            return HoverInfo(
+                title: "\(service) → \(groupLabels[to] ?? "destination")", subtitle: "\(aggregate.total) connections", rows: rows, footnote: nil)
 
         case .edge(.process(let from), .process(let to)):
             var rows = trafficRows(aggregate)
@@ -1082,7 +1239,7 @@ public final class GraphController: @unchecked Sendable {
                 kind = Self.classification(address)
             case .group(let groupKind, let key):
                 far = groupLabels[.group(groupKind, key)] ?? key
-                kind = groupKind == .asn ? "network owner" : "country"
+                kind = Self.groupName(groupKind)
             case .endpoint(let address):
                 far = aggregate.name ?? address.description
                 kind = aggregate.name == nil ? Self.classification(address) : "\(address) · \(Self.classification(address))"
@@ -1191,11 +1348,20 @@ public final class GraphController: @unchecked Sendable {
 
     // MARK: - Helpers
 
-    private static func clip(_ text: String, to limit: Int) -> String {
+    static func groupName(_ kind: GroupKind) -> String {
+        switch kind {
+        case .asn: "network owner"
+        case .country: "country"
+        case .domain: "domain"
+        case .rest: "size"
+        }
+    }
+
+    static func clip(_ text: String, to limit: Int) -> String {
         text.count > limit ? String(text.prefix(limit - 1)) + "…" : text
     }
 
-    private static func list(_ items: [String], limit: Int = 4) -> String {
+    static func list(_ items: [String], limit: Int = 4) -> String {
         items.count <= limit ? items.joined(separator: ", ") : items.prefix(limit).joined(separator: ", ") + " +\(items.count - limit)"
     }
 
@@ -1204,7 +1370,7 @@ public final class GraphController: @unchecked Sendable {
     }
 
     /// 0 at nothing, 1 at `10^scale`, logarithmic in between.
-    private static func level(_ value: Double, scale: Double) -> Float {
+    static func level(_ value: Double, scale: Double) -> Float {
         Float(min(max(log10(1 + value) / scale, 0), 1))
     }
 

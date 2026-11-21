@@ -413,6 +413,8 @@ Interaction:
 | Hierarchy | v1.0 | User → process → domain → address |
 | Chord, port matrix | v1.1 | Process ↔ ASN; process × remote port |
 
+As built in M7 part one, a layout is an arrangement of the constellation's own nodes, so selection, tooltips, the filter, and the tables carry across and a switch is a glide. **Flow** is the Sankey: four columns (this Mac, processes, services, owners) with straight ribbons whose width is their share of the bytes on screen; the owner is the network owner if known, else the domain, else the network. **Lanes** is the swim-lane view: one row per process and a bar per connection over a chosen span. The 28 largest processes and 32 largest destinations (flow) and the 40 busiest processes (lanes) get places of their own; the rest are folded together. Globe and hierarchy are not built yet.
+
 ### 10.3 Panels
 
 Dockable, resizable, all optional: Connections table · Top Talkers · Throughput · Protocol and Port Mix · Listeners (exposed ones highlighted) · First Seen · DNS Activity · Interfaces · Age Histogram · Process Trust · Health.
@@ -449,7 +451,7 @@ The app keeps a rolling window of the recent past: one snapshot of the model per
 
 ### 10.6 Workspaces and display
 
-Named workspaces save layout, panels, filters, and profile; three ship by default (**NOC Wall**, **Privacy Audit**, **Developer**). Kiosk mode goes full screen across displays. The menu bar extra shows a live rate sparkline and the top three talkers.
+Named workspaces save layout, panels, filters, and profile; three ship by default (**NOC Wall**, **Privacy Audit**, **Developer**). Kiosk mode goes full screen on one display, shows only the graph, hides the pointer, and keeps the display awake; `--workspace NAME`, `--kiosk`, and `--display N` start it that way. As built, a workspace holds layout, profile, filter, panel, panel and inspector visibility, keep-ended, clustering, and kiosk, and settings with workspaces export to and import from JSON. The menu bar extra shows a live rate sparkline and the top three talkers.
 
 ---
 

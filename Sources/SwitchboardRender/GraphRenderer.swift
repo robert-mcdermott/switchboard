@@ -18,6 +18,11 @@ public struct Camera: Sendable, Equatable {
     public static func fitting(extent: Float, viewport: SIMD2<Float>) -> Float {
         min(viewport.x, viewport.y) * 0.5 / max(extent, 1)
     }
+
+    /// The scale at which a layout of the given half-width and half-height just fits.
+    public static func fitting(halfSize: SIMD2<Float>, viewport: SIMD2<Float>) -> Float {
+        min(viewport.x * 0.5 / max(halfSize.x, 1), viewport.y * 0.5 / max(halfSize.y, 1))
+    }
 }
 
 /// How much spectacle to apply (docs/SPEC.md §9.3). Every profile shows the same data.
@@ -278,7 +283,12 @@ public final class GraphRenderer {
 
             var offset: SIMD2<Float>
             let distance = simd_length(node.center)
-            if request.kind == 0 || distance < 1 {
+            if let side = request.side {
+                // A layout that has said where its labels go: beside the node, or beneath it.
+                offset = side == 0
+                    ? SIMD2(-size.x * 0.5, -reach)
+                    : SIMD2(side > 0 ? reach : -reach - size.x, size.y * 0.5)
+            } else if request.kind == 0 || distance < 1 {
                 // The host: centred beneath the node.
                 offset = SIMD2(-size.x * 0.5, -reach)
             } else {

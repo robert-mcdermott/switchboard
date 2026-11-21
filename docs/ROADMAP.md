@@ -241,6 +241,8 @@ M4 and M5 are independent of each other and can proceed in parallel once M3 clos
 
 **Exit:** NOC Wall workspace runs full screen on a second display for eight hours without intervention.
 
+**Status: part one built; exit criterion not yet met.** The flow (Sankey) and lanes layouts, transitions that keep selection, workspaces with the three defaults, kiosk mode, and five golden images are done; both new layouts draw at the display's 120 Hz on live traffic. The globe and hierarchy view are part two. Display placement and settings import and export are written and untested. Eight simulated hours ran through each layout without a window; the eight real hours on a second display have not been run. 185 tests pass. Details in [spikes/M7-findings.md](spikes/M7-findings.md).
+
 ---
 
 ## M8 — v1.0 hardening

@@ -40,7 +40,7 @@ public enum HeadlessRenderer {
         controller.settle()
         let frame = controller.frame(labelBudget: profile.labelBudget)
         let viewport = SIMD2(Float(width), Float(height))
-        let camera = Camera(center: .zero, scale: Camera.fitting(extent: frame.extent, viewport: viewport))
+        let camera = Camera(center: .zero, scale: Camera.fitting(halfSize: frame.halfSize, viewport: viewport))
         renderer.render(frame, camera: camera, time: time, backing: 2, to: target, commandBuffer: commandBuffer)
         commandBuffer.commit()
         commandBuffer.waitUntilCompleted()

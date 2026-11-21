@@ -10,6 +10,8 @@
 
 set -euo pipefail
 
+MODE="${1:-}"
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 swift build --package-path "$ROOT" >/dev/null
 APP="$(swift build --package-path "$ROOT" --show-bin-path)/SwitchboardApp"
@@ -19,17 +21,21 @@ GOLDEN="$ROOT/Tests/Goldens"
 mkdir -p "$OUT" "$GOLDEN"
 
 status=0
-for scenario in quiet developer stress; do
-  "$APP" --snapshot "$OUT/$scenario.png" --source "sim:$scenario" --at 20 --size 1200x750 >/dev/null
-  if [ "${1:-}" = "--update" ]; then
-    cp "$OUT/$scenario.png" "$GOLDEN/$scenario.png"
-    echo "UPDATED $scenario"
-  elif [ ! -f "$GOLDEN/$scenario.png" ]; then
-    echo "MISSING $scenario: no golden image; run scripts/snapshots.sh --update"
+# name, scenario, and layout of each reference picture.
+for entry in "quiet quiet constellation" "developer developer constellation" "stress stress constellation" \
+             "flow developer flow" "lanes developer lanes"; do
+  set -- $entry
+  name="$1"; scenario="$2"; layout="$3"
+  "$APP" --snapshot "$OUT/$name.png" --source "sim:$scenario" --layout "$layout" --at 20 --size 1200x750 >/dev/null
+  if [ "$MODE" = "--update" ]; then
+    cp "$OUT/$name.png" "$GOLDEN/$name.png"
+    echo "UPDATED $name"
+  elif [ ! -f "$GOLDEN/$name.png" ]; then
+    echo "MISSING $name: no golden image; run scripts/snapshots.sh --update"
     status=1
   else
-    printf '%-10s ' "$scenario"
-    "$APP" --diff "$OUT/$scenario.png" "$GOLDEN/$scenario.png" || status=1
+    printf '%-10s ' "$name"
+    "$APP" --diff "$OUT/$name.png" "$GOLDEN/$name.png" || status=1
   fi
 done
 exit $status
