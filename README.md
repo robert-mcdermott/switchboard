@@ -1,3 +1,5 @@
+<img src="docs/icon.png" alt="" width="128" align="right">
+
 # Switchboard
 
 A live picture of every network connection on your Mac: which program is talking, to whom, how much, and for how long.
@@ -60,7 +62,7 @@ scripts/bundle.sh
 open build/Switchboard.app
 ```
 
-`bundle.sh` builds a release and assembles `build/Switchboard.app`, signed ad hoc. There is no Xcode project. `scripts/release.sh` makes an unsigned zip with checksums; see the [guide](docs/GUIDE.md#installing) for opening one.
+`bundle.sh` builds a release and assembles `build/Switchboard.app`, signed ad hoc, with its icon. There is no Xcode project. `scripts/release.sh` makes an unsigned zip with checksums; see the [guide](docs/GUIDE.md#installing) for opening one.
 
 To see it without touching your own traffic, run it on simulated data:
 

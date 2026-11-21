@@ -37,6 +37,9 @@ for bundle in "$BIN"/Switchboard_*.bundle; do
   [ -d "$bundle" ] && cp -R "$bundle" "$STAGE/Contents/Resources/"
 done
 
+# The icon is drawn by scripts/make-icon.swift and committed, so building needs nothing else.
+cp "$ROOT/Assets/AppIcon.icns" "$STAGE/Contents/Resources/AppIcon.icns"
+
 cat > "$STAGE/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -46,6 +49,7 @@ cat > "$STAGE/Contents/Info.plist" <<PLIST
   <key>CFBundleDisplayName</key><string>Switchboard</string>
   <key>CFBundleIdentifier</key><string>$IDENTIFIER</string>
   <key>CFBundleExecutable</key><string>Switchboard</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$VERSION</string>

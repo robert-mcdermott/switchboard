@@ -499,7 +499,7 @@ scripts/bundle.sh
 open build/Switchboard.app
 ```
 
-`bundle.sh` assembles the `.app` (executable, `Info.plist`, icon, resources) and signs it ad hoc with `codesign -s -`. There is no Xcode project in the repository. Releases, if any, are unsigned zips with checksums and a documented `xattr` step; building from source is the primary path. `scripts/release.sh` (M8) makes one: it tests, builds, and zips the app, the collector, `sbctl`, the scripts, and the guide with SHA-256 checksums and the quarantine steps, and publishes nothing.
+`bundle.sh` assembles the `.app` (executable, `Info.plist`, icon, resources) and signs it ad hoc with `codesign -s -`. The icon, `Assets/AppIcon.icns`, is drawn in code by `scripts/make-icon.swift` (a bright core with curved links in the graph's protocol colours, on its dark graph paper) and committed, so a build needs nothing else. There is no Xcode project in the repository. Releases, if any, are unsigned zips with checksums and a documented `xattr` step; building from source is the primary path. `scripts/release.sh` (M8) makes one: it tests, builds, and zips the app, the collector, `sbctl`, the scripts, and the guide with SHA-256 checksums and the quarantine steps, and publishes nothing.
 
 GeoIP data is not bundled. `scripts/fetch-geoip.sh` is run by the user to download DB-IP Lite (CC BY, no account) and the app reads whatever `.mmdb` files it finds in Application Support.
 
