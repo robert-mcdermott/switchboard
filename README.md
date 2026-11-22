@@ -10,7 +10,7 @@ Switchboard draws this Mac in the centre, the programs using the network around 
 
 It is built to be watched on a wall and to be useful at a desk.
 
-> **Status: beta.** Version 0.1.0 is the first release. Milestones 0 to 7 of 8 are built, and the hardening of 8 is underway. It runs and is used daily on the author's machine, but it is not signed with a Developer ID or notarised, and has only been run on macOS 27 on Apple silicon. See [docs/ROADMAP.md](docs/ROADMAP.md).
+> **Status: beta. [Version 0.1.0](https://github.com/robert-mcdermott/switchboard/releases/tag/v0.1.0), the first release, came out on 21 November 2026**, for Macs with Apple silicon. It installs with one command ([Install](#install), below); no clone, Xcode, or Swift is needed. Milestones 0 to 7 of 8 are built, and the hardening of 8 is underway. It is used daily on the author's Mac, but has only been run on macOS 27, and it is not signed with a Developer ID or notarised. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## What it shows
 
