@@ -230,9 +230,12 @@ public final class NStatSource: FlowSource, @unchecked Sendable {
         var queryDescription: SourceFn
     }
 
-    /// The socket's ID in a subscription's callbacks: set by its first description, then fixed.
+    /// A socket's state in a subscription's callbacks, which the framework runs one at a time.
     private final class SourceBox: @unchecked Sendable {
+        /// Set by the first description, then fixed.
         var id: UInt64?
+        /// The last state published was a TCP connection still opening.
+        var opening = false
     }
     private let clock = MachClock()
     private var lastCounterQuery: EngineTime = -.infinity
@@ -313,8 +316,7 @@ public final class NStatSource: FlowSource, @unchecked Sendable {
             let pointer = UInt64(UInt(bitPattern: source))
 
             // Descriptions and counts carry the same keys, so one handler serves both.
-            let onUpdate: DictionaryBlock = { dictionary in
-                guard let dictionary = dictionary as NSDictionary? else { return }
+            let publish = { (dictionary: NSDictionary) in
                 guard !inbox.isRetired(generation) else { return }
                 guard var observation = Self.observation(
                     from: dictionary, sourceID: 0, clock: clock, interfaces: interfaces)
@@ -330,12 +332,29 @@ public final class NStatSource: FlowSource, @unchecked Sendable {
                     inbox.noteLive(box.id!, generation: generation)
                 }
                 // A newer subscription has this socket: its figures are the ones to use.
-                guard inbox.isNewest(box.id!, generation: generation) else { return }
+                guard inbox.isNewest(box.id!, generation: generation) else {
+                    box.opening = false
+                    return
+                }
+                if let state = observation.tcpState { box.opening = Self.isOpening(state) }
                 observation.sourceID = box.id!
                 inbox.push(.seen(observation), startTicks: start)
             }
-            functions.setDescriptionBlock(source, onUpdate)
-            functions.setCountsBlock(source, onUpdate)
+            let onDescription: DictionaryBlock = { dictionary in
+                guard let dictionary = dictionary as NSDictionary? else { return }
+                publish(dictionary)
+            }
+            let onCounts: DictionaryBlock = { dictionary in
+                guard let dictionary = dictionary as NSDictionary? else { return }
+                publish(dictionary)
+                // Counts repeat the TCP state from the last description. Root is told of a
+                // socket as it appears, so its first description says it is still
+                // connecting, and it would read so until the next renewal. Asking again
+                // on each counter refresh brings the state in within one.
+                if box.opening { functions.queryDescription(source) }
+            }
+            functions.setDescriptionBlock(source, onDescription)
+            functions.setCountsBlock(source, onCounts)
 
             let onRemoved: VoidBlock = {
                 // A socket never described was never published.
@@ -354,6 +373,11 @@ public final class NStatSource: FlowSource, @unchecked Sendable {
         functions.addAllUDP(manager)
         functions.queryAllDescriptions(manager, nil)
         return manager
+    }
+
+    /// A TCP connection still opening, whose description is worth asking for again.
+    static func isOpening(_ state: TCPState) -> Bool {
+        state == .synSent || state == .synReceived
     }
 
     /// An ID for a socket from what does not change over its life: protocol, owner, local

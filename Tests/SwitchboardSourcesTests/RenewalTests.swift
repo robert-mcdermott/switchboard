@@ -54,6 +54,16 @@ private func observation(_ local: UInt16, _ remote: UInt16, pid: Int32 = 10, sta
     }
 }
 
+/// Only connections still opening are described again on each counter refresh: as root
+/// their first description is taken before they open. The case needs root, so it is
+/// measured through the collector (docs/spikes/M8-findings.md) rather than here.
+@Suite struct OpeningTests {
+    @Test func onlyConnectionsStillOpeningAreDescribedAgain() {
+        let again = TCPState.allCases.filter(NStatSource.isOpening)
+        #expect(again == [.synSent, .synReceived])
+    }
+}
+
 /// A loopback TCP connection held open by this process.
 private final class LoopbackPair {
     let listener: Int32, client: Int32, server: Int32
