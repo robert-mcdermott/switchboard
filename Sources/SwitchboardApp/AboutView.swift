@@ -25,22 +25,22 @@ struct AboutView: View {
                     "A log of connections, on this Mac only, at \(logPath): process, account, path, addresses, ports, bytes, times, hostnames, country and network owner, and signature. How much and for how long is set in Settings ▸ Log, and the Log panel can erase it.",
                     "The last few minutes in memory, for the timeline. Gone when the app quits.",
                     "Its settings and workspaces, in the app's preferences.",
-                    "Location databases, if you fetched them, in \(geoPath).",
+                    "Location databases, if you downloaded them, in \(geoPath).",
                 ])
                 section("What it sends", [
                     "Nothing. No telemetry, no crash reports, no update checks, no account.",
-                    "The one exception is a setting you must choose: \"Hostnames, looking up the rest\" asks your DNS resolver for the name of each address nothing else has named, at most five a second. It is off unless you turn it on.",
+                    "Two exceptions, both your choice. \"Hostnames, looking up the rest\" asks your DNS resolver for the name of each address nothing else has named, at most five a second; it is off unless you turn it on. Download Location Data, in Settings ▸ Location, fetches two files from download.db-ip.com when you press it.",
                     "It never asks the network where this Mac is; the globe's home is guessed from the time zone or set by you.",
                 ])
                 section("What runs with privilege", [
-                    "Only the optional collector, switchboardd, installed with sudo scripts/install.sh and removed with scripts/uninstall.sh. It reads sockets and packet headers, publishes them on a socket only administrators can open, opens no network listener, changes nothing, and links no third-party code.",
-                    "The app itself never runs as root and never asks for a password.",
+                    "Only the optional collector, switchboardd, installed from the Health tab and removed from there. It reads sockets and packet headers, publishes them on a socket only administrators can open, opens no network listener, changes nothing, and links no third-party code.",
+                    "The app itself never runs as root. Installing or removing the collector has macOS ask for an administrator's password; the app never sees it.",
                 ])
                 section("Interfaces Apple does not document", [
                     "NetworkStatistics, the kernel's socket list, and PKTAP packet capture. Each is optional at run time and reported on the Health tab, so a macOS update that breaks one costs detail rather than the app.",
                 ])
                 section("Data from others", [
-                    "IP Geolocation by DB-IP (db-ip.com), licensed CC BY 4.0, when you have fetched it.",
+                    "IP Geolocation by DB-IP (db-ip.com), licensed CC BY 4.0, when you have downloaded it.",
                     "The globe's coastlines: Natural Earth (naturalearthdata.com), 1:110m, public domain, built in.",
                 ])
             }

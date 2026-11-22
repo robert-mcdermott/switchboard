@@ -51,7 +51,7 @@ struct SwitchboardApp: App {
         }
 
         Settings {
-            SettingsView()
+            SettingsView(model: model)
         }
 
         Window("About Switchboard", id: "about") {
@@ -85,6 +85,8 @@ struct StatusMenu: View {
 }
 
 struct SettingsView: View {
+    let model: AppModel
+
     static var guessedHome: String {
         let point = GeoPoint.guess()
         return String(format: "%.2f, %.2f (from the time zone)", point.latitude, point.longitude)
@@ -152,7 +154,25 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
             Section("Location and network owner") {
-                Text("Country, city, and network owner come from database files in\n~/Library/Application Support/Switchboard/GeoIP. Switchboard never downloads them; run scripts/fetch-geoip.sh to fetch the free DB-IP Lite databases (IP Geolocation by DB-IP, CC BY 4.0), then restart.")
+                if BundledScript.fetchLocationData.url != nil {
+                    HStack(spacing: 10) {
+                        Button(model.geoStatus.hasPrefix("Location data") ? "Download Again" : "Download Location Data") {
+                            model.downloadLocationData()
+                        }
+                        .disabled(model.downloadingLocation)
+                        if model.downloadingLocation {
+                            ProgressView().controlSize(.small)
+                            Text("Downloading about 130 MB…").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                Text(model.geoStatus).font(.caption)
+                if let note = model.locationNote {
+                    Text(note).font(.caption).foregroundStyle(Color.orange).textSelection(.enabled)
+                }
+                Text(BundledScript.fetchLocationData.url != nil
+                    ? "Country, city, and network owner come from the free DB-IP Lite databases (IP Geolocation by DB-IP, CC BY 4.0), downloaded from db-ip.com only when you press the button. They are kept in ~/Library/Application Support/Switchboard/GeoIP; DB-IP publishes new ones each month."
+                    : "Country, city, and network owner come from database files in\n~/Library/Application Support/Switchboard/GeoIP. Run scripts/fetch-geoip.sh to fetch the free DB-IP Lite databases (IP Geolocation by DB-IP, CC BY 4.0).")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

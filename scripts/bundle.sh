@@ -3,7 +3,9 @@
 #
 #   scripts/bundle.sh [release|debug]
 #
-# No Xcode project, no Apple Developer account. The result lands in build/Switchboard.app.
+# No Xcode project, no Apple Developer account. The result lands in build/Switchboard.app,
+# carrying the collector, sbctl, and the scripts that install the collector and download
+# the location data.
 
 set -euo pipefail
 
@@ -15,7 +17,8 @@ case "$CONFIG" in
 esac
 
 VERSION="$(sed -n 's/.*static let version = "\(.*\)".*/\1/p' "$ROOT/Sources/SwitchboardCore/Switchboard.swift")"
-IDENTIFIER="$(sed -n 's/.*static let identifierPrefix = "\(.*\)".*/\1/p' "$ROOT/Sources/SwitchboardCore/Switchboard.swift").app"
+PREFIX="$(sed -n 's/.*static let identifierPrefix = "\(.*\)".*/\1/p' "$ROOT/Sources/SwitchboardCore/Switchboard.swift")"
+IDENTIFIER="$PREFIX.app"
 
 echo "==> Building ($CONFIG)"
 swift build --package-path "$ROOT" -c "$CONFIG"
@@ -30,6 +33,14 @@ if [ -d "$STAGE" ]; then rm -r "$STAGE"; fi
 mkdir -p "$STAGE/Contents/MacOS" "$STAGE/Contents/Resources"
 
 cp "$BIN/SwitchboardApp" "$STAGE/Contents/MacOS/Switchboard"
+# The collector and sbctl travel inside the app, so a release needs nothing else: the app
+# installs the collector from here, and sbctl runs from here.
+cp "$BIN/switchboardd" "$BIN/sbctl" "$STAGE/Contents/MacOS/"
+# The scripts the app runs: the collector's installer and uninstaller, and the location
+# download. Executable, so the app can check they are there and runnable.
+install -m 755 "$ROOT/scripts/install.sh" "$STAGE/Contents/Resources/install-collector.sh"
+install -m 755 "$ROOT/scripts/uninstall.sh" "$STAGE/Contents/Resources/uninstall-collector.sh"
+install -m 755 "$ROOT/scripts/fetch-geoip.sh" "$STAGE/Contents/Resources/fetch-geoip.sh"
 
 # SwiftPM puts each target's resources in <Package>_<Target>.bundle beside the binary.
 # Inside an app they belong in Contents/Resources (see RenderResources.swift).
@@ -63,8 +74,12 @@ cat > "$STAGE/Contents/Info.plist" <<PLIST
 PLIST
 
 echo "==> Signing (ad hoc)"
+# The helpers first: the app's signature covers them as nested code.
+for helper in switchboardd sbctl; do
+  codesign --force --sign - --timestamp=none --identifier "$PREFIX.$helper" "$STAGE/Contents/MacOS/$helper"
+done
 codesign --force --sign - --timestamp=none "$STAGE"
-codesign --verify --strict "$STAGE"
+codesign --verify --strict --deep "$STAGE"
 
 if [ -d "$APP" ]; then rm -r "$APP"; fi
 mv "$STAGE" "$APP"

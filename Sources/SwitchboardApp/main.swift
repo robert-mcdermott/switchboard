@@ -10,4 +10,6 @@ if let code = HeadlessCommand.run(CommandLine.arguments) {
 // without a value, such as --kiosk or --hide-this-mac, shifts the pairs by one and leaves a
 // later value over, and the window never appeared. Switchboard opens no documents.
 UserDefaults.standard.register(defaults: ["NSTreatUnknownArgumentsAsOpen": "NO"])
+// Builds before 0.1.0 kept their settings under another identifier.
+SettingsMigration.runAtLaunch()
 SwitchboardApp.main()

@@ -579,7 +579,9 @@ final class AppModel {
         session.controller.setTagColors(colors)
         feed?.setEnricher(loaded.database.isEmpty ? nil : loaded.database)
         if loaded.database.sources.isEmpty {
-            geoStatus = "No location database. Run scripts/fetch-geoip.sh to add one."
+            geoStatus = BundledScript.fetchLocationData.url == nil
+                ? "No location database. Run scripts/fetch-geoip.sh to add one."
+                : "No location database. Settings ▸ Location can download one."
         } else {
             geoStatus = "Location data: " + loaded.database.sources.joined(separator: ", ")
         }
@@ -884,6 +886,61 @@ final class AppModel {
                 self.scanning = false
             }
         }
+    }
+
+    // MARK: - Installing the collector and location data
+
+    /// What an install or removal of the collector is doing, or `nil` when idle.
+    private(set) var collectorWork: String?
+    /// How the last one ended, if there is something to say.
+    private(set) var collectorNote: String?
+    private(set) var downloadingLocation = false
+    /// Why the last download failed.
+    private(set) var locationNote: String?
+
+    /// The collector's build, in Full mode.
+    var collectorVersion: String? { summary.collectorVersion }
+    /// The collector is a different build from this app, so should be reinstalled from it.
+    var collectorOutdated: Bool { collectorVersion.map { $0 != Switchboard.version } ?? false }
+
+    /// Installs, or reinstalls, the collector this app carries. macOS asks for an
+    /// administrator's password; the app notices the collector once it is running.
+    func installCollector() { runCollectorScript(.installCollector, saying: "Installing the collector…") }
+
+    func removeCollector() { runCollectorScript(.removeCollector, saying: "Removing the collector…") }
+
+    private func runCollectorScript(_ script: BundledScript, saying work: String) {
+        guard collectorWork == nil, let url = script.url else { return }
+        collectorWork = work
+        collectorNote = nil
+        Task {
+            let outcome = await ScriptRunner.runAsAdministrator(url)
+            collectorWork = nil
+            collectorNote = outcome.cancelled ? nil : outcome.summary
+        }
+    }
+
+    /// Fetches the DB-IP Lite databases, about 130 MB from download.db-ip.com, when the
+    /// person asks. Nothing else in the app touches the network.
+    func downloadLocationData() {
+        guard !downloadingLocation, let url = BundledScript.fetchLocationData.url else { return }
+        downloadingLocation = true
+        locationNote = nil
+        Task {
+            let outcome = await ScriptRunner.run(url)
+            downloadingLocation = false
+            if outcome.succeeded {
+                reloadLocationData()
+            } else {
+                locationNote = outcome.summary
+            }
+        }
+    }
+
+    /// Reads the location databases again, after a download.
+    func reloadLocationData() {
+        enrichmentLoaded = false
+        loadEnrichment()
     }
 
     func clearFocus() {

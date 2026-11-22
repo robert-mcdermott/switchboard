@@ -10,13 +10,13 @@ Switchboard draws this Mac in the centre, the programs using the network around 
 
 It is built to be watched on a wall and to be useful at a desk.
 
-> **Status: pre-release.** Milestones 0 to 7 of 8 are built, and the hardening of 8 is underway. It runs and is used daily on the author's machine, but it is not notarised, has no published release, and has only been run on macOS 27 on Apple silicon. See [docs/ROADMAP.md](docs/ROADMAP.md).
+> **Status: beta.** Version 0.1.0 is the first release. Milestones 0 to 7 of 8 are built, and the hardening of 8 is underway. It runs and is used daily on the author's machine, but it is not signed with a Developer ID or notarised, and has only been run on macOS 27 on Apple silicon. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## What it shows
 
 - **Every connection, by program**: process, user, remote address and port, bytes and rate each way, age, TCP state, round-trip time.
 - **Names**: hostnames from the DNS answers and TLS handshakes it sees, never from lookups of its own unless you turn that on.
-- **Places and owners**: country, city, and network owner for each destination, from a database you download.
+- **Places and owners**: country, city, and network owner for each destination, from a free database it downloads when you ask.
 - **Trust**: who signed each program. Unsigned and tampered programs get a red ring; ad hoc ones an amber ring.
 - **History**: a log in SQLite that you can search with the same filter you use live, replay in the graph, and export as CSV or JSON lines.
 - **New things**: destinations this Mac has never talked to before are ringed and listed.
@@ -52,26 +52,57 @@ Six colour themes, cycled with **T**: Standard, the four below (Neon, Phosphor, 
 
 ## What it does not do
 
-It watches; it never blocks, changes, or injects anything. It sends nothing anywhere: no telemetry, no update check, no crash reports. It keeps no packet contents. The one exception to "sends nothing" is optional reverse DNS lookups, which are off unless you choose them.
+It watches; it never blocks, changes, or injects anything. It sends nothing anywhere: no telemetry, no update check, no crash reports. It keeps no packet contents. It touches the network itself only when you ask: to download the location databases, and for optional reverse DNS lookups, which are off unless you choose them.
 
-## Requirements
+## Install
 
-- macOS 15 or later (developed and tested on macOS 27, Apple silicon)
-- Xcode command line tools with Swift 6
-
-There are no other dependencies. Nothing is fetched at build time.
-
-## Build and run
+Switchboard needs a Mac with Apple silicon (M1 or later) and macOS 15 or later. In Terminal:
 
 ```bash
-scripts/bundle.sh
+curl -fsSL https://github.com/robert-mcdermott/switchboard/releases/latest/download/install.sh | bash
+```
+
+It puts Switchboard in /Applications and asks two questions: whether to install the collector (Full mode, below; it asks for your password), and whether to download the location databases (about 130 MB from db-ip.com). Run the same command again to update. To read the script before running it:
+
+```bash
+curl -fsSL https://github.com/robert-mcdermott/switchboard/releases/latest/download/install.sh -o install.sh
+```
+
+```bash
+less install.sh
+```
+
+```bash
+bash install.sh
+```
+
+You can also download the zip from the [releases page](https://github.com/robert-mcdermott/switchboard/releases) and drag Switchboard.app to Applications. Switchboard is not signed with a Developer ID or notarised, so the first time you open a copy downloaded with a browser, macOS refuses; open System Settings ▸ Privacy & Security and click **Open Anyway**. The installer avoids this: `curl` does not mark what it downloads as quarantined, and the installer checks the zip against the SHA-256 published with the release.
+
+To remove everything:
+
+```bash
+curl -fsSL https://github.com/robert-mcdermott/switchboard/releases/latest/download/install.sh | bash -s -- --uninstall
+```
+
+The [guide](docs/GUIDE.md#installing) has the installer's options.
+
+## Build from source
+
+You need the Xcode command line tools with Swift 6. There are no other dependencies, and nothing is fetched at build time.
+
+```bash
+git clone https://github.com/robert-mcdermott/switchboard.git
+```
+
+```bash
+cd switchboard && scripts/bundle.sh
 ```
 
 ```bash
 open build/Switchboard.app
 ```
 
-`bundle.sh` builds a release and assembles `build/Switchboard.app`, signed ad hoc, with its icon. There is no Xcode project. `scripts/release.sh` makes an unsigned zip with checksums; see the [guide](docs/GUIDE.md#installing) for opening one.
+`bundle.sh` builds a release and assembles `build/Switchboard.app`, signed ad hoc, with its icon and the collector, `sbctl`, and the scripts that install the collector and download the location data inside it. There is no Xcode project. `scripts/release.sh` builds a release zip and its installer; `scripts/release.sh --publish` puts them on GitHub.
 
 To see it without touching your own traffic, run it on simulated data:
 
@@ -85,6 +116,8 @@ build/Switchboard.app/Contents/MacOS/Switchboard --source sim:developer
 
 **Full** adds a small collector that runs as root. With it Switchboard sees every account's connections and learns hostnames from DNS and TLS. The app notices the collector and switches on its own.
 
+The installer offers to install the collector, and the app's Health tab has **Install Collector…** and **Remove Collector…**; macOS asks for an administrator's password, which Switchboard never sees. From a clone of the repository:
+
 ```bash
 sudo scripts/install.sh
 ```
@@ -93,27 +126,21 @@ sudo scripts/install.sh
 sudo scripts/uninstall.sh
 ```
 
-The install script says exactly what it copies and where; the uninstall script reverses each step. The collector is one dependency-free binary that reads, publishes to a local socket only administrators can open, and changes nothing.
+The install script says exactly what it copies and where; the uninstall script reverses each step. The collector is one dependency-free binary that reads, publishes to a local socket only administrators can open, and changes nothing. The app carries its own copy, so the Health tab offers to update the collector when the two differ.
 
 ## On a wall
 
 The **Workspace** menu holds named arrangements of layout, filter, and panels. Three come with it (NOC Wall, Privacy Audit, Developer) and you can save your own. Kiosk mode (**K**, **Esc** to leave) goes full screen with nothing but the graph. To start a display that way:
 
 ```bash
-build/Switchboard.app/Contents/MacOS/Switchboard --workspace "NOC Wall" --display 2
+/Applications/Switchboard.app/Contents/MacOS/Switchboard --workspace "NOC Wall" --display 2
 ```
 
 Other keys: **Space** pauses, **/** jumps to the filter, **P** changes how lively the picture is, **E** keeps ended connections on screen, **L** shows or hides traffic that never leaves this Mac, **T** changes the colour theme, **B** and **I** show and hide the panels and the inspector, **0** resets the view.
 
 ## Location data
 
-Country, city, and network owner come from the free DB-IP Lite databases. Switchboard never downloads them itself; you do, when you choose:
-
-```bash
-scripts/fetch-geoip.sh
-```
-
-Restart the app afterwards. The data is *IP Geolocation by DB-IP*, licensed CC BY 4.0.
+Country, city, and network owner come from the free DB-IP Lite databases, about 130 MB. Switchboard downloads them only when you ask: the installer offers to, and Settings ▸ Location has **Download Location Data**, which also fetches each month's new edition. From a clone, `scripts/fetch-geoip.sh` does the same. The data is *IP Geolocation by DB-IP*, licensed CC BY 4.0.
 
 The globe also needs to know where this Mac is. It guesses from the time zone; set it exactly in Settings ▸ Globe. Switchboard never asks the network.
 
@@ -138,11 +165,13 @@ Separately, the laptop button (**L**) shows or hides connections that never leav
 
 ## The command line tool
 
-`sbctl` reads the same engine without the window, and is how most of Switchboard is tested.
+`sbctl` reads the same engine without the window, and is how most of Switchboard is tested. It travels inside the app:
 
 ```bash
-swift build && .build/debug/sbctl
+/Applications/Switchboard.app/Contents/MacOS/sbctl top
 ```
+
+From a clone, `swift build && .build/debug/sbctl`.
 
 | Command | What it does |
 |---|---|

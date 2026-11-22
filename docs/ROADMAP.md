@@ -258,7 +258,7 @@ M4 and M5 are independent of each other and can proceed in parallel once M3 clos
 - Accessibility pass: VoiceOver, full keyboard navigation, Still profile.
 - About pane listing exactly what is collected and stored.
 - README, build and install guide, troubleshooting, a section on what Standalone cannot see.
-- Release script: unsigned zip, checksums, quarantine instructions.
+- Release script: unsigned zip, checksums, an installer that needs no clone, publishing to GitHub.
 
 **Exit:** every success metric below is met and written down with its measurement.
 
@@ -272,6 +272,7 @@ M4 and M5 are independent of each other and can proceed in parallel once M3 clos
 - **An app icon**, drawn in code by `scripts/make-icon.swift`.
 - **Colour themes:** Standard, Neon, Phosphor, Amber, Ice, Colour-safe; **T** cycles them.
 - **A sixth layout, Cyberspace (6):** the address space as a floor in 3D on a Hilbert curve, a tower on each destination's address, beams from the processes above, flown through with the mouse and W A S D.
+- **Installing without a clone:** release 0.1.0 for Apple silicon on GitHub, installed with one `curl … | bash` command that checks the zip against its published SHA-256. The app carries the collector, `sbctl`, and their scripts; its Health tab installs, updates, and removes the collector, and Settings ▸ Location downloads the location data. Identifiers are now `io.github.robert-mcdermott.switchboard`, with old settings and the old collector carried over.
 
 ---
 

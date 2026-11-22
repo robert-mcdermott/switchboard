@@ -4,9 +4,46 @@ How to install Switchboard, what each part of it does, and what to do when somet
 
 ## Installing
 
-### From source (recommended)
+Switchboard needs a Mac with Apple silicon (M1 or later) and macOS 15 or later. It has only been tested on macOS 27.
 
-You need macOS 15 or later and Xcode or its command line tools, with Swift 6.
+### With the installer (recommended)
+
+```bash
+curl -fsSL https://github.com/robert-mcdermott/switchboard/releases/latest/download/install.sh | bash
+```
+
+The installer:
+
+1. checks this is an Apple silicon Mac on macOS 15 or later;
+2. downloads the release's zip and checks it against the SHA-256 written into the installer, so it installs nothing that differs from what was released;
+3. puts Switchboard.app in /Applications, quitting and replacing a copy already there;
+4. asks whether to install the collector (Full mode, below), with `sudo`, which asks for your password; a collector already installed is updated without asking, so it matches the app;
+5. asks whether to download the location databases, unless you have them;
+6. opens Switchboard.
+
+Run it again to update. To read it before running it, download it with `curl -fsSL <the address above> -o install.sh`, read it, then `bash install.sh`. Options, after `bash -s --` when piping:
+
+| Option | Does |
+|---|---|
+| `--collector`, `--no-collector` | Install or update the collector, or leave it alone, without asking |
+| `--geoip`, `--no-geoip` | Download the location databases, or not, without asking |
+| `--yes` | Ask nothing: install the app, and update a collector already installed |
+| `--dir DIR` | Put the app in DIR, such as `~/Applications`, instead of /Applications |
+| `--no-open` | Do not open the app afterwards |
+| `--zip FILE` | Install from a zip already downloaded; it is still checked against the release |
+| `--uninstall` | Remove the collector and the app, and ask before removing your log, databases, and settings |
+
+The installer downloads with `curl`, which does not mark files as quarantined, so macOS opens the app without the warning below.
+
+### From the zip
+
+Download `Switchboard-<version>-arm64.zip` from the [releases page](https://github.com/robert-mcdermott/switchboard/releases), open it, and drag Switchboard.app to Applications. Switchboard is signed ad hoc, not with a Developer ID, and is not notarised, so the first time you open it macOS says it cannot check it. Open System Settings ▸ Privacy & Security, scroll to Security, and click **Open Anyway**; you are asked once. To check the zip first, compare `shasum -a 256 Switchboard-<version>-arm64.zip` with the release's `SHA256SUMS`.
+
+Everything else is in the app: the Health tab installs the collector and Settings ▸ Location downloads the location data.
+
+### From source
+
+You need Xcode or its command line tools, with Swift 6.
 
 ```bash
 git clone https://github.com/robert-mcdermott/switchboard.git
@@ -20,21 +57,18 @@ cd switchboard && scripts/bundle.sh
 open build/Switchboard.app
 ```
 
-Nothing is downloaded during the build; Switchboard has no third-party dependencies.
+Nothing is downloaded during the build; Switchboard has no third-party dependencies. `scripts/release.sh` tests and builds a release in `build/release`: the zip, `install.sh` with the zip's checksum filled in, and `SHA256SUMS`. With `--publish` it creates the GitHub release from them, from a clean `main` that has been pushed.
 
-### From a release zip
+### What goes where
 
-A release zip is not signed with a Developer ID and not notarised, so macOS blocks it until you clear the quarantine flag your browser added. Check the download, then clear the flag:
+| What | Where |
+|---|---|
+| The app, with the collector, `sbctl`, and the scripts it runs inside it | `/Applications/Switchboard.app` |
+| The collector, once installed | `/usr/local/libexec/switchboardd`, started by `/Library/LaunchDaemons/io.github.robert-mcdermott.switchboard.collector.plist`, logging to `/var/log/switchboardd.log` |
+| The log and the location databases | `~/Library/Application Support/Switchboard` |
+| Settings and workspaces | The app's preferences, `io.github.robert-mcdermott.switchboard.app` |
 
-```bash
-shasum -a 256 -c SHA256SUMS
-```
-
-```bash
-xattr -dr com.apple.quarantine Switchboard.app bin
-```
-
-To make a release zip yourself, run `scripts/release.sh`. It tests, builds, and leaves the zip and its checksum in `build/release`.
+Builds before 0.1.0 used the identifier `local.switchboard`. The first launch of 0.1.0 carries their settings over, and installing the collector replaces the old one.
 
 ## Standalone and Full
 
@@ -49,6 +83,8 @@ Switchboard runs in one of two modes, shown at the top left of the window.
 
 **Full** adds a small collector, `switchboardd`, that runs as root. With it Switchboard sees every account's connections, reads hostnames from DNS answers and TLS server names, and learns what protocol a connection really speaks. The app notices the collector and switches to Full on its own.
 
+To install it, press **Install Collector…** on the Health tab, or answer yes when the installer asks. macOS asks for an administrator's password; Switchboard never sees it. The same tab has **Remove Collector…**, and **Update Collector…** when the collector is a different version from the app. From a clone:
+
 ```bash
 sudo scripts/install.sh
 ```
@@ -57,17 +93,13 @@ sudo scripts/install.sh
 sudo scripts/uninstall.sh
 ```
 
-The install script builds the collector as you, copies it to `/usr/local/libexec/switchboardd`, and registers it with launchd. The uninstall script reverses each step. From a release zip, use `sudo scripts/install.sh --binary bin/switchboardd`.
+Installing copies the collector to `/usr/local/libexec/switchboardd`, owned by root, and registers it with launchd; from a clone it builds the collector first, as you, and the app installs the copy it carries. Removing reverses each step.
 
 ## Location and network owner
 
-Country, city, and network owner come from the free DB-IP Lite databases. Switchboard never downloads them on its own:
+Country, city, and network owner come from the free DB-IP Lite databases, about 130 MB. Switchboard downloads them only when you ask: press **Download Location Data** in Settings ▸ Location, or answer yes when the installer asks. The app uses them as soon as they arrive. DB-IP publishes new ones a day or two into each month; press **Download Again** whenever you like. From a clone, `scripts/fetch-geoip.sh` does the same, and the app reads the files at its next start.
 
-```bash
-scripts/fetch-geoip.sh
-```
-
-Restart Switchboard afterwards. Check one address with `sbctl geo 8.8.8.8`. The data is *IP Geolocation by DB-IP*, licensed CC BY 4.0. DB-IP publishes a new file each month; run the script again whenever you like.
+Check one address with `sbctl geo 8.8.8.8`. The data is *IP Geolocation by DB-IP*, licensed CC BY 4.0.
 
 The globe also needs to know where this Mac is. It guesses from the time zone; to set it exactly, open Settings ▸ Globe and enter a latitude and longitude such as `47.61, -122.33`.
 
@@ -215,11 +247,11 @@ Choose *Save Current as Workspace…* to add your own. *Export Settings…* and 
 
 ## Troubleshooting
 
-**It says Standalone, but the collector is installed.** Check it is running: `sudo launchctl print system/local.switchboard.collector`. Its log is `/var/log/switchboardd.log`. Reinstalling with `sudo scripts/install.sh` restarts it. Switchboard checks for the collector every few seconds and switches on its own.
+**It says Standalone, but the collector is installed.** Check it is running: `sudo launchctl print system/io.github.robert-mcdermott.switchboard.collector`. Its log is `/var/log/switchboardd.log`. Reinstalling from the Health tab, or with `sudo scripts/install.sh`, restarts it. Switchboard checks for the collector every few seconds and switches on its own.
 
 **No hostnames, only addresses.** Hostnames come from the collector's packet capture, so Standalone has none. In Full mode, some names are never visible on the wire: encrypted DNS (DoH, DoT), Encrypted Client Hello, and iCloud Private Relay all hide them, and QUIC connections are named only through DNS. Settings ▸ Hostnames ▸ *looking up the rest* fills gaps with reverse lookups, which do send queries to your DNS resolver.
 
-**No countries or owners.** Run `scripts/fetch-geoip.sh` and restart. Settings and the Health tab say which databases are loaded. Private addresses never have a country.
+**No countries or owners.** Press **Download Location Data** in Settings ▸ Location. Settings and the Health tab say which databases are loaded. Private addresses never have a country.
 
 **The globe puts everything under "no location".** The same: no location database loaded, or these are addresses the database does not know.
 
@@ -227,7 +259,7 @@ Choose *Save Current as Workspace…* to add your own. *Export Settings…* and 
 
 **macOS asks whether to reopen windows.** This happens after Switchboard was stopped while starting up. Choose either; it is harmless.
 
-**A download shows little received traffic, then a spike when it ends.** Builds before 21 November 2026 did this: the system tells an ordinary program about other programs' new connections only when they close. Switchboard now asks afresh every few seconds, so a new connection appears within about 5 seconds (10 with the collector) and is live from then on. In Full mode, reinstall the collector with `sudo scripts/install.sh` to get the fix there too. The Health tab's NetworkStatistics line shows how often it renews, and in Full mode how many of the connections the kernel lists it is reporting.
+**A download shows little received traffic, then a spike when it ends.** Builds before 21 November 2026 did this: the system tells an ordinary program about other programs' new connections only when they close. Switchboard now asks afresh every few seconds, so a new connection appears within about 5 seconds (10 with the collector) and is live from then on. In Full mode, update the collector from the Health tab to get the fix there too. The Health tab's NetworkStatistics line shows how often it renews, and in Full mode how many of the connections the kernel lists it is reporting.
 
 **It uses more CPU than I would like.** Switch to the Operator profile (**P**), which draws half as often. Hiding the panels (**B**) saves a little more.
 

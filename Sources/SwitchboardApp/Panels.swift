@@ -303,6 +303,48 @@ struct ListenersPanel: View {
     }
 }
 
+/// Installs, updates, and removes the collector the app carries. Outside an app bundle,
+/// as under `swift run`, there is nothing to install from, so it shows the command instead.
+struct CollectorControls: View {
+    @Bindable var model: AppModel
+    let installed: Bool
+
+    var body: some View {
+        if BundledScript.installCollector.url != nil {
+            HStack(spacing: 10) {
+                if installed {
+                    Button(model.collectorOutdated ? "Update Collector…" : "Reinstall Collector…") { model.installCollector() }
+                    Button("Remove Collector…") { model.removeCollector() }
+                } else {
+                    Button("Install Collector…") { model.installCollector() }
+                }
+                if let work = model.collectorWork {
+                    ProgressView().controlSize(.small)
+                    Text(work).foregroundStyle(Color.dim)
+                }
+            }
+            .disabled(model.collectorWork != nil)
+            Text(installed
+                ? "Removing it takes away every part of it, and the app carries on in Standalone. macOS asks for an administrator's password; Switchboard never sees it."
+                : "The collector is a small service that runs as root. It reads sockets and packet headers, opens no network listener, and changes nothing. macOS asks for an administrator's password; Switchboard never sees it.")
+                .foregroundStyle(Color.dim)
+            if let note = model.collectorNote {
+                Text(note).foregroundStyle(Color.readout).textSelection(.enabled)
+            }
+        } else if !installed {
+            HStack(spacing: 10) {
+                Text("To see everything, install the collector. In Terminal, from the Switchboard folder:")
+                    .foregroundStyle(Color.dim)
+                Text(BundledScript.installCollector.command).foregroundStyle(Color.signal).textSelection(.enabled)
+                Button("Copy") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(BundledScript.installCollector.command, forType: .string)
+                }
+            }
+        }
+    }
+}
+
 struct HealthPanel: View {
     @Bindable var model: AppModel
 
@@ -315,22 +357,17 @@ struct HealthPanel: View {
                     if model.fullMode {
                         Text("The collector is running as root and reports every account's connections. The app switched to it automatically and will fall back to Standalone if it stops.")
                             .foregroundStyle(Color.dim)
-                    } else if !model.simulated, getuid() != 0 {
-                        Text("Standalone mode shows connections made by your own processes. System daemons and other accounts are not shown; that needs the root collector, which is not built yet.")
-                            .foregroundStyle(Color.dim)
-                        Text("Around one in twenty of your own connections is also withheld by macOS from unprivileged tools. The cause is not yet known.")
-                            .foregroundStyle(Color.dim)
-                        HStack(spacing: 10) {
-                            Text("To see everything, install the collector. In Terminal, from the Switchboard folder:")
-                                .foregroundStyle(Color.dim)
-                            Text("sudo scripts/install.sh").foregroundStyle(Color.signal).textSelection(.enabled)
-                            Button("Copy") {
-                                NSPasteboard.general.clearContents()
-                                NSPasteboard.general.setString("sudo scripts/install.sh", forType: .string)
-                            }
+                        if model.collectorOutdated, let version = model.collectorVersion {
+                            Text("The collector is version \(version) and this app is \(Switchboard.version). Update it so the two match.")
+                                .foregroundStyle(Color.caution)
                         }
-                        Text("Switchboard never asks for your password itself. The app notices the collector within a couple of seconds of it starting.")
+                        CollectorControls(model: model, installed: true)
+                    } else if !model.simulated, getuid() != 0 {
+                        Text("Standalone mode shows connections made by your own processes. Other accounts, system daemons, and hostnames need the collector.")
                             .foregroundStyle(Color.dim)
+                        Text("macOS also withholds around one in twenty of your own connections from ordinary programs, and tells them of other programs' new connections only when they close, so Switchboard checks again every 5 seconds.")
+                            .foregroundStyle(Color.dim)
+                        CollectorControls(model: model, installed: false)
                     }
                 }
                 if !model.simulated, !model.fullMode, getuid() != 0 {

@@ -28,6 +28,8 @@ final class LiveFeed: @unchecked Sendable {
         var sources: [String] = []
         var healthy = true
         var mode = Mode.standalone
+        /// The collector's build, in Full mode.
+        var collectorVersion: String?
     }
 
     private let spec: String
@@ -221,6 +223,7 @@ final class LiveFeed: @unchecked Sendable {
                     summary.healthy = failures.isEmpty && (collector != nil || sources.allSatisfy { $0.health.running })
                     if let collector {
                         summary.mode = .full(collectorUID: collector.collectorUID)
+                        summary.collectorVersion = collector.collectorVersion
                     } else {
                         summary.mode = simulated ? .simulated : .standalone
                     }

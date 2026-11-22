@@ -2,34 +2,45 @@
 # Installs the Switchboard collector as a system service.
 #
 #   sudo scripts/install.sh                                build from source and install
-#   sudo scripts/install.sh --binary bin/switchboardd      install a collector from a release zip
+#   sudo scripts/install.sh --binary path/to/switchboardd  install a collector built elsewhere
+#
+# A copy of this script travels inside Switchboard.app as install-collector.sh. Run from
+# there (the app's Install Collector button does that) it installs the collector the app
+# carries, so nothing is built.
 #
 # What it does, and nothing else:
-#   1. builds switchboardd if it is not built (as you, not as root)
+#   1. builds switchboardd if it is not built (as you, not as root), unless the app carries one
 #   2. copies it to /usr/local/libexec/switchboardd, owned by root
-#   3. writes /Library/LaunchDaemons/local.switchboard.collector.plist
+#   3. writes /Library/LaunchDaemons/<label>.plist
 #   4. starts it, and has launchd keep it running
 #
-# scripts/uninstall.sh reverses every step.
+# A collector installed by a build before 0.1.0, under the label local.switchboard.collector,
+# is stopped and its file removed first. The uninstall script reverses every step.
 
 set -euo pipefail
 
 if [ "$(id -u)" -ne 0 ]; then
-  echo "This installs a system service, so it needs sudo:  sudo scripts/install.sh" >&2
+  echo "This installs a system service, so it needs sudo:  sudo $0" >&2
   exit 1
 fi
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LABEL="local.switchboard.collector"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$HERE/.." && pwd)"
+LABEL="io.github.robert-mcdermott.switchboard.collector"
+OLD_LABEL="local.switchboard.collector"
 BINARY="/usr/local/libexec/switchboardd"
 PLIST="/Library/LaunchDaemons/$LABEL.plist"
 LOG="/var/log/switchboardd.log"
+SOCKET="/var/run/switchboard.sock"
 
 if [ "${1:-}" = "--binary" ] && [ -n "${2:-}" ]; then
-  # From a release zip: install the collector it came with.
   SOURCE="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"
   [ -x "$SOURCE" ] || { echo "no collector at $2" >&2; exit 1; }
   echo "==> Using $SOURCE"
+elif [ -x "$ROOT/MacOS/switchboardd" ]; then
+  # Inside Switchboard.app: Contents/Resources/install-collector.sh beside Contents/MacOS.
+  SOURCE="$ROOT/MacOS/switchboardd"
+  echo "==> Using the collector in $(cd "$ROOT/.." && pwd)"
 else
   # Build as the person who ran sudo, so the build directory does not end up owned by root.
   BUILDER="${SUDO_USER:-root}"
@@ -39,10 +50,15 @@ else
   [ -x "$SOURCE" ] || { echo "build did not produce $SOURCE" >&2; exit 1; }
 fi
 
+for label in "$OLD_LABEL" "$LABEL"; do
+  if launchctl print "system/$label" >/dev/null 2>&1; then
+    echo "==> Stopping the running collector ($label)"
+    launchctl bootout "system/$label" || true
+  fi
+done
+rm -f "/Library/LaunchDaemons/$OLD_LABEL.plist"
+
 echo "==> Installing $BINARY"
-if launchctl print "system/$LABEL" >/dev/null 2>&1; then
-  launchctl bootout "system/$LABEL" || true
-fi
 mkdir -p /usr/local/libexec
 install -o root -g wheel -m 755 "$SOURCE" "$BINARY"
 
@@ -67,15 +83,17 @@ chown root:wheel "$PLIST"
 chmod 644 "$PLIST"
 
 echo "==> Starting"
+# The old collector's socket may linger for a moment after it stops.
+rm -f "$SOCKET"
 launchctl bootstrap system "$PLIST"
 
 for _ in 1 2 3 4 5 6 7 8 9 10; do
-  [ -S /var/run/switchboard.sock ] && break
+  [ -S "$SOCKET" ] && break
   sleep 0.3
 done
-if [ -S /var/run/switchboard.sock ]; then
-  echo "==> Running. The app will switch to Full mode within a couple of seconds."
-  echo "    Log: $LOG      Remove with: sudo scripts/uninstall.sh"
+if [ -S "$SOCKET" ]; then
+  echo "    Log: $LOG"
+  echo "==> Running. Switchboard switches to Full mode within a couple of seconds."
 else
   echo "The service was installed but its socket has not appeared. See $LOG" >&2
   exit 1

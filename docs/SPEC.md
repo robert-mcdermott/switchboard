@@ -482,8 +482,8 @@ Budgets are measured by `sbctl bench` and the simulator, not by eye, and are che
 
 ## 12. Security and privacy
 
-1. **Local only.** No telemetry, crash upload, or update check. The app makes no network connection unless Active resolution is on, and then only PTR queries through the system resolver.
-2. **Least privilege.** Root is confined to a dependency-free daemon with a read-only job. The app never runs as root and never asks for a password.
+1. **Local only.** No telemetry, crash upload, or update check. The app makes no network connection except when the user asks: PTR queries through the system resolver when Active resolution is on, and the DB-IP Lite download when they press Download Location Data.
+2. **Least privilege.** Root is confined to a dependency-free daemon with a read-only job. The app never runs as root. Installing or removing the collector from the Health tab runs the script the app carries through `osascript`'s `with administrator privileges`, so macOS asks for the password and the app never sees it. The script copies the collector out of the app to a root-owned path, so the running daemon is never a file an ordinary account can change.
 3. **No payloads.** Capture is snap-limited and filtered; packets are parsed and dropped.
 4. **Guarded IPC.** Admin-only socket, peer UID check, bounded parsing, versioned protocol.
 5. **Honest about private interfaces.** The kernel socket list, NetworkStatistics, and PKTAP are not public API. Each is isolated, contract-tested, optional at runtime, and reported in Health.
@@ -505,9 +505,11 @@ scripts/bundle.sh
 open build/Switchboard.app
 ```
 
-`bundle.sh` assembles the `.app` (executable, `Info.plist`, icon, resources) and signs it ad hoc with `codesign -s -`. The icon, `Assets/AppIcon.icns`, is drawn in code by `scripts/make-icon.swift` (a bright core with curved links in the graph's protocol colours, on its dark graph paper) and committed, so a build needs nothing else. There is no Xcode project in the repository. Releases, if any, are unsigned zips with checksums and a documented `xattr` step; building from source is the primary path. `scripts/release.sh` (M8) makes one: it tests, builds, and zips the app, the collector, `sbctl`, the scripts, and the guide with SHA-256 checksums and the quarantine steps, and publishes nothing.
+`bundle.sh` assembles the `.app` (executable, `Info.plist`, icon, resources) and signs it ad hoc with `codesign -s -`. The app carries the collector and `sbctl` in `Contents/MacOS`, signed first as nested code, and in `Contents/Resources` the three scripts it runs: `install-collector.sh` and `uninstall-collector.sh` (copies of `scripts/install.sh` and `scripts/uninstall.sh`; run from inside the app, the installer installs the collector beside it instead of building one) and `fetch-geoip.sh`. The icon, `Assets/AppIcon.icns`, is drawn in code by `scripts/make-icon.swift` (a bright core with curved links in the graph's protocol colours, on its dark graph paper) and committed, so a build needs nothing else. There is no Xcode project in the repository.
 
-GeoIP data is not bundled. `scripts/fetch-geoip.sh` is run by the user to download DB-IP Lite (CC BY, no account) and the app reads whatever `.mmdb` files it finds in Application Support.
+As built in M8, releases are for Apple silicon only and go on GitHub. `scripts/release.sh` tests, builds, and writes three files: `Switchboard-<version>-arm64.zip` (just the app), `install.sh` (`scripts/web-install.sh` with the version and the zip's SHA-256 filled in), and `SHA256SUMS`; `--publish` creates the release `v<version>` from a clean, pushed `main`, with notes from `docs/releases/<version>.md`. People install with `curl -fsSL …/releases/latest/download/install.sh | bash`, which checks the Mac, downloads and verifies the zip, replaces the app in /Applications, and offers the collector and the location data. `curl` does not quarantine what it downloads, so the ad-hoc-signed app opens without a Gatekeeper prompt; a zip saved by a browser needs Open Anyway once. Signing with a Developer ID and notarising would allow a `.dmg` and installing the collector through `SMAppService`; that waits on the owner's Apple Developer membership.
+
+GeoIP data is not bundled: it is 130 MB and changes monthly. The app's Download Location Data button, the installer, or `scripts/fetch-geoip.sh` fetches DB-IP Lite (CC BY, no account) into Application Support, and the app reads whatever `.mmdb` files it finds there.
 
 ---
 
@@ -547,6 +549,6 @@ The simulator and trace replay exist so that every view can be developed, demons
 ## 16. Decisions needed from the owner
 
 1. **Licence and visibility.** MIT, Apache-2.0, or GPL; public from the start or private until v1.0. Blocks nothing until the first release.
-2. **Identifier prefix.** Bundle ID and LaunchDaemon label. Placeholder: `local.switchboard`.
+2. ~~**Identifier prefix.**~~ Decided for 0.1.0: `io.github.robert-mcdermott.switchboard`, giving the bundle ID `….app` and the LaunchDaemon label `….collector`. The first launch carries settings over from the placeholder `local.switchboard`, and installing the collector replaces one installed under it.
 3. **Default profile.** This spec defaults to Cinema. Operator is the safer default for daily use.
 4. **Private framework use.** NetworkStatistics is private API and, after M0, the only way an unprivileged build can see flows with counters. The spec now depends on it. Without it, Switchboard needs the root collector from first launch.
