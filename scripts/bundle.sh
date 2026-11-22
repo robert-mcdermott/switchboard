@@ -41,6 +41,8 @@ cp "$BIN/switchboardd" "$BIN/sbctl" "$STAGE/Contents/MacOS/"
 install -m 755 "$ROOT/scripts/install.sh" "$STAGE/Contents/Resources/install-collector.sh"
 install -m 755 "$ROOT/scripts/uninstall.sh" "$STAGE/Contents/Resources/uninstall-collector.sh"
 install -m 755 "$ROOT/scripts/fetch-geoip.sh" "$STAGE/Contents/Resources/fetch-geoip.sh"
+# The licence travels with every copy.
+cp "$ROOT/LICENSE" "$ROOT/NOTICE" "$STAGE/Contents/Resources/"
 
 # SwiftPM puts each target's resources in <Package>_<Target>.bundle beside the binary.
 # Inside an app they belong in Contents/Resources (see RenderResources.swift).

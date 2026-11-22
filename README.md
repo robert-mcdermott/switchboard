@@ -225,4 +225,7 @@ The second renders reference scenes and compares them with golden images.
 - It has run for 2.5 hours at a stretch, not days. Memory with an hour of history was about 315 MB and still creeping up slowly.
 - Kiosk mode has not had a long unattended run, and moving between displays is untested.
 - QUIC connections get names from DNS only, and encrypted DNS, ECH, and Private Relay all reduce what any observer on the machine can name.
-- No licence has been chosen yet.
+
+## Licence
+
+Copyright 2026 Robert McDermott. Licensed under the [Apache License, Version 2.0](LICENSE).

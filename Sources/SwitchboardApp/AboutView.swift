@@ -43,6 +43,9 @@ struct AboutView: View {
                     "IP Geolocation by DB-IP (db-ip.com), licensed CC BY 4.0, when you have downloaded it.",
                     "The globe's coastlines: Natural Earth (naturalearthdata.com), 1:110m, public domain, built in.",
                 ])
+                section("Licence", [
+                    "Copyright 2026 Robert McDermott. Licensed under the Apache License, Version 2.0; the full text is in the app, at Contents/Resources/LICENSE, and at apache.org/licenses/LICENSE-2.0.",
+                ])
             }
             .padding(24)
             .frame(maxWidth: 620, alignment: .leading)

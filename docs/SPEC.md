@@ -548,7 +548,7 @@ The simulator and trace replay exist so that every view can be developed, demons
 
 ## 16. Decisions needed from the owner
 
-1. **Licence and visibility.** MIT, Apache-2.0, or GPL; public from the start or private until v1.0. Blocks nothing until the first release.
+1. ~~**Licence and visibility.**~~ Decided for 0.1.0: public, under the Apache License 2.0, copyright 2026 Robert McDermott (`LICENSE`, `NOTICE`; both travel inside the app).
 2. ~~**Identifier prefix.**~~ Decided for 0.1.0: `io.github.robert-mcdermott.switchboard`, giving the bundle ID `….app` and the LaunchDaemon label `….collector`. The first launch carries settings over from the placeholder `local.switchboard`, and installing the collector replaces one installed under it.
 3. **Default profile.** This spec defaults to Cinema. Operator is the safer default for daily use.
 4. **Private framework use.** NetworkStatistics is private API and, after M0, the only way an unprivileged build can see flows with counters. The spec now depends on it. Without it, Switchboard needs the root collector from first launch.
