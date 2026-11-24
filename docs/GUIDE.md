@@ -247,6 +247,8 @@ Choose *Save Current as Workspace…* to add your own. *Export Settings…* and 
 
 ## Troubleshooting
 
+**The installer says the download does not match the release's checksum.** The installer published before 24 November 2026 said this whenever the check could not run, not only when the download was wrong. Two things stopped it running: an Intel-only `shasum` left in `/usr/local/bin` by an old Homebrew, which cannot run on a Mac without Rosetta, and Perl settings such as `PERL5LIB`, which can break macOS's own `shasum`. Run the install command again to get the current installer, which uses only macOS's own tools. If it still finds a difference, it shows what arrived instead. A few kilobytes of HTML means a proxy or web filter on your network replaced the download: try another network, or install [from the zip](#from-the-zip).
+
 **It says Standalone, but the collector is installed.** Check it is running: `sudo launchctl print system/io.github.robert-mcdermott.switchboard.collector`. Its log is `/var/log/switchboardd.log`. Reinstalling from the Health tab, or with `sudo scripts/install.sh`, restarts it. Switchboard checks for the collector every few seconds and switches on its own.
 
 **No hostnames, only addresses.** Hostnames come from the collector's packet capture, so Standalone has none. In Full mode, some names are never visible on the wire: encrypted DNS (DoH, DoT), Encrypted Client Hello, and iCloud Private Relay all hide them, and QUIC connections are named only through DNS. Settings ▸ Hostnames ▸ *looking up the rest* fills gaps with reverse lookups, which do send queries to your DNS resolver.

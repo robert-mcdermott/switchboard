@@ -27,6 +27,11 @@
 
 set -euo pipefail
 
+# Only macOS's own tools. A program earlier on someone's PATH may not even run here: Intel-only
+# builds left in /usr/local/bin by an old Homebrew fail with "Bad CPU type" on a Mac without
+# Rosetta. The scripts this runs inherit it.
+export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+
 VERSION="@VERSION@"
 ZIP_SHA256="@ZIP_SHA256@"
 REPO="robert-mcdermott/switchboard"
@@ -48,6 +53,21 @@ Installs or updates Switchboard. Options:
 USAGE
 }
 fail() { printf 'Switchboard: %s\n' "$*" >&2; exit 1; }
+
+# A file's SHA-256, or nothing if it cannot be computed; why goes to the file named second.
+# macOS's shasum is a Perl script, so it runs with an empty environment, where no Perl
+# settings of the user's (PERL5LIB from local::lib, say) can break it. openssl is the fallback.
+sha256_of() {
+  local sum
+  sum="$(env -i /usr/bin/shasum -a 256 "$1" 2>>"$2")" || sum=""
+  sum="${sum%% *}"
+  if ! [[ "$sum" =~ ^[0-9a-f]{64}$ ]]; then
+    sum="$(/usr/bin/openssl dgst -sha256 -r "$1" 2>>"$2")" || sum=""
+    sum="${sum%% *}"
+  fi
+  [[ "$sum" =~ ^[0-9a-f]{64}$ ]] || sum=""
+  printf '%s' "$sum"
+}
 
 DIR="/Applications"
 COLLECTOR=""   # yes, no, or empty to ask
@@ -154,13 +174,30 @@ else
 fi
 
 say "Checking it against the release's SHA-256"
-echo "$ZIP_SHA256  $WORK/$ZIP_NAME" | shasum -a 256 -c - >/dev/null 2>&1 ||
+# A check that cannot run is reported as that, not as a mismatch.
+GOT="$(sha256_of "$WORK/$ZIP_NAME" "$WORK/checksum-errors")"
+if [ -z "$GOT" ]; then
+  sed 's/^/    /' "$WORK/checksum-errors" >&2
+  fail "could not compute the download's SHA-256 (neither shasum nor openssl worked), so nothing was installed."
+fi
+if [ "$GOT" != "$ZIP_SHA256" ]; then
+  KIND="$(file -b "$WORK/$ZIP_NAME" | cut -d, -f1)"
+  printf '    expected    %s\n    downloaded  %s\n    which is    %s bytes, %s\n' \
+    "$ZIP_SHA256" "$GOT" "$(wc -c <"$WORK/$ZIP_NAME" | tr -d ' ')" "$KIND" >&2
+  case "$KIND" in
+    Zip*) ;;
+    *) echo "    That is not a zip: something between this Mac and GitHub, such as a proxy or web filter, sent something else." >&2 ;;
+  esac
   fail "the download does not match the release's checksum, so nothing was installed."
+fi
 
-ditto -x -k "$WORK/$ZIP_NAME" "$WORK/unpacked"
+ditto -x -k "$WORK/$ZIP_NAME" "$WORK/unpacked" || fail "could not unpack $ZIP_NAME"
 NEW="$WORK/unpacked/Switchboard.app"
 [ -d "$NEW" ] || fail "the zip holds no Switchboard.app"
-codesign --verify --strict --deep "$NEW" 2>/dev/null || fail "Switchboard.app's signature does not verify, so nothing was installed."
+if ! SIGNATURE="$(codesign --verify --strict --deep "$NEW" 2>&1)"; then
+  printf '%s\n' "$SIGNATURE" | sed 's/^/    /' >&2
+  fail "Switchboard.app's signature does not verify, so nothing was installed."
+fi
 
 mkdir -p "$DIR"
 [ -w "$DIR" ] || fail "cannot write to $DIR. Try --dir \"$HOME/Applications\"."
