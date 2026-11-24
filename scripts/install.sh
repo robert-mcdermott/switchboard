@@ -19,6 +19,12 @@
 
 set -euo pipefail
 
+# Only macOS's own tools: something earlier on the PATH, such as an Intel-only build left in
+# /usr/local/bin by an old Homebrew, may not run here. Building is the exception and keeps
+# the PATH it was given, so it finds whichever Swift the person uses.
+GIVEN_PATH="$PATH"
+export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+
 if [ "$(id -u)" -ne 0 ]; then
   echo "This installs a system service, so it needs sudo:  sudo $0" >&2
   exit 1
@@ -45,8 +51,8 @@ else
   # Build as the person who ran sudo, so the build directory does not end up owned by root.
   BUILDER="${SUDO_USER:-root}"
   echo "==> Building the collector (as $BUILDER)"
-  sudo -u "$BUILDER" swift build --package-path "$ROOT" -c release --product switchboardd
-  SOURCE="$(sudo -u "$BUILDER" swift build --package-path "$ROOT" -c release --show-bin-path)/switchboardd"
+  sudo -u "$BUILDER" env PATH="$GIVEN_PATH" swift build --package-path "$ROOT" -c release --product switchboardd
+  SOURCE="$(sudo -u "$BUILDER" env PATH="$GIVEN_PATH" swift build --package-path "$ROOT" -c release --show-bin-path)/switchboardd"
   [ -x "$SOURCE" ] || { echo "build did not produce $SOURCE" >&2; exit 1; }
 fi
 

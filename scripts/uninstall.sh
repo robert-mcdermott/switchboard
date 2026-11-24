@@ -9,6 +9,10 @@
 
 set -euo pipefail
 
+# Only macOS's own tools: something earlier on the PATH, such as an Intel-only build left in
+# /usr/local/bin by an old Homebrew, may not run here.
+export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+
 if [ "$(id -u)" -ne 0 ]; then
   echo "This removes a system service, so it needs sudo:  sudo $0" >&2
   exit 1

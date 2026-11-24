@@ -16,6 +16,10 @@
 
 set -euo pipefail
 
+# Only macOS's own tools. Something earlier on the PATH may not run here (an Intel-only build
+# left in /usr/local/bin by an old Homebrew) or may differ: GNU date has no -v, used below.
+export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+
 DIR="$HOME/Library/Application Support/Switchboard/GeoIP"
 mkdir -p "$DIR"
 

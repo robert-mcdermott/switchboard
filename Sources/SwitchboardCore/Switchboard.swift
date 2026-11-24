@@ -1,6 +1,6 @@
 /// Project-wide constants.
 public enum Switchboard {
-    public static let version = "0.1.0"
+    public static let version = "0.1.1"
 
     /// Reverse-DNS prefix for the bundle identifier (`<prefix>.app`) and the collector's
     /// LaunchDaemon label (`<prefix>.collector`).
