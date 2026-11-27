@@ -8,7 +8,7 @@ A live picture of every network connection on your Mac: which program is talking
 
 Switchboard draws this Mac in the centre, the programs using the network around it, and the places they talk to beyond. Lines carry pulses in proportion to traffic. Underneath is a console: tables, a filter language, a timeline you can drag backwards, and a searchable log of everything it has seen.
 
-It is built to be watched on a wall and to be useful at a desk.
+It is built to be watched on a wall and to be useful at a desk. **Website: [robert-mcdermott.github.io/switchboard](https://robert-mcdermott.github.io/switchboard/)**
 
 > **Status: beta. The latest release is [version 0.1.1](https://github.com/robert-mcdermott/switchboard/releases/tag/v0.1.1), a fix to the installer, from 24 November 2026**, for Macs with Apple silicon. The first release, 0.1.0, came out on 21 November. It installs with one command ([Install](#install), below); no clone, Xcode, or Swift is needed. Milestones 0 to 7 of 8 are built, and the hardening of 8 is underway. It is used daily on the author's Mac, but has only been run on macOS 27, and it is not signed with a Developer ID or notarised. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
@@ -201,6 +201,7 @@ The full design is in [docs/SPEC.md](docs/SPEC.md). What was measured, and what 
 
 ## Documentation
 
+- [The website](https://robert-mcdermott.github.io/switchboard/): the guide, searchable, with pictures.
 - [docs/GUIDE.md](docs/GUIDE.md): installing, using, and troubleshooting.
 - [docs/SPEC.md](docs/SPEC.md): the design.
 - [docs/ROADMAP.md](docs/ROADMAP.md): what is built and what is next.
