@@ -49,6 +49,14 @@ fi
 echo "==> Testing"
 swift test --package-path "$ROOT" 2>&1 | tail -1
 
+# The website is built from the guide; a broken link in it stops the release.
+echo "==> Checking the website builds"
+if command -v node >/dev/null && [ "$(node -p 'process.versions.node.split(".")[0]')" -ge 22 ]; then
+  node "$ROOT/scripts/site/build.mjs" --out "$ROOT/build/site"
+else
+  echo "    skipped: it needs Node.js 22 or later"
+fi
+
 echo "==> Building Switchboard $VERSION"
 "$ROOT/scripts/bundle.sh" >/dev/null
 
@@ -84,4 +92,6 @@ if [ "$PUBLISH" -eq 1 ]; then
   gh release create "$TAG" "$OUT/$ZIP" "$OUT/install.sh" "$OUT/SHA256SUMS" \
     --repo robert-mcdermott/switchboard --target "$(git -C "$ROOT" rev-parse HEAD)" \
     --title "Switchboard $VERSION" --notes-file "$NOTES"
+  echo "==> Next, publish the website for $VERSION (scripts/site/README.md):"
+  echo "    node scripts/site/build.mjs --publish ../switchboard-site"
 fi

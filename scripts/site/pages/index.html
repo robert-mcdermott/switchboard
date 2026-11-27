@@ -1,0 +1,116 @@
+<section class="hero">
+  <p class="eyebrow">Network monitor for macOS · free and open source</p>
+  <h1 id="switchboard">See every connection your Mac makes.</h1>
+  <p class="lead">Switchboard draws a live picture of the network on your Mac: which program is talking, to whom, how much, and for how long. It has six ways to look at it, a filter language, a timeline you can drag back, and a log you can search. It watches and never blocks, and it sends nothing anywhere.</p>
+  <div class="install">
+    <div class="code"><pre><code class="language-bash">curl -fsSL https://github.com/robert-mcdermott/switchboard/releases/latest/download/install.sh | bash</code></pre></div>
+    <p>Paste it into Terminal. Version {{version}}, a beta, for Macs with Apple silicon on macOS 15 or later. The installer checks the download against the release's checksum and asks before anything that needs your password.</p>
+  </div>
+  <div class="cta">
+    <a class="button primary" href="installing.html">Install</a>
+    <a class="button" href="the-window.html">Read the guide</a>
+    <a class="button quiet" href="https://github.com/robert-mcdermott/switchboard" rel="noopener">Source on GitHub</a>
+  </div>
+  {{shot:console|The Switchboard window: this Mac in the centre, the programs using the network around it, the places they talk to beyond, an inspector on the right, and tables of traffic underneath}}
+</section>
+
+<section class="pillars">
+  <div><h3>Every connection, by program</h3><p>Process, account, remote address and port, bytes and rate each way, age, TCP state, and round-trip time, live.</p></div>
+  <div><h3>Names, places, owners</h3><p>Hostnames from the DNS answers and TLS handshakes it sees, and the country, city, and network owner of each destination.</p></div>
+  <div><h3>Who signed it</h3><p>Unsigned and tampered programs get a red ring. Destinations this Mac has never talked to before are marked and listed.</p></div>
+  <div><h3>Nothing leaves your Mac</h3><p>No telemetry, no update checks, no crash reports, and no packet contents kept. It goes online only when you ask.</p></div>
+</section>
+
+<section class="layouts">
+  <div class="section-head">
+    <p class="eyebrow">Six layouts</p>
+    <h2 id="layouts">Six ways to look at the same traffic</h2>
+    <p>Press <kbd>1</kbd> to <kbd>6</kbd> to switch. Whatever you have selected stays selected, so you can follow one program from one picture to the next. <a href="the-window.html#layouts">The layouts →</a></p>
+  </div>
+  <div class="gallery">
+    <figure>{{img:console|The constellation layout: this Mac in the centre, its programs around it, and their destinations beyond}}<figcaption><kbd>1</kbd><strong>Constellation</strong> The whole machine at a glance.</figcaption></figure>
+    <figure>{{img:flow|The flow layout: programs on the left, kinds of traffic in the middle, and the owners of the destinations on the right}}<figcaption><kbd>2</kbd><strong>Flow</strong> Where the bytes go: program, then protocol, then whoever owns the far end.</figcaption></figure>
+    <figure>{{img:lanes|The lanes layout: one row for each program, with a bar for each connection over time}}<figcaption><kbd>3</kbd><strong>Lanes</strong> What happened when: a row per program, a bar per connection.</figcaption></figure>
+    <figure>{{img:globe|The globe layout: arcs from this Mac to destinations around the world}}<figcaption><kbd>4</kbd><strong>Globe</strong> Where in the world your traffic goes.</figcaption></figure>
+    <figure>{{img:hierarchy|The hierarchy layout: accounts, programs, domains, and addresses as a tree}}<figcaption><kbd>5</kbd><strong>Hierarchy</strong> Account, program, domain, and address, as a tree.</figcaption></figure>
+    <figure>{{img:cyberspace|The cyberspace layout: towers of light standing on a floor that maps the address space}}<figcaption><kbd>6</kbd><strong>Cyberspace</strong> The address space as a floor in 3D, to fly through.</figcaption></figure>
+  </div>
+</section>
+
+<section class="feature">
+  <div class="feature-text">
+    <p class="eyebrow">Full mode</p>
+    <h2 id="names">Names, not just numbers</h2>
+    <p>On its own, Switchboard needs no password and sees every connection your account makes. Add its small collector, which runs as root, and it sees every account's connections and reads hostnames from DNS answers and TLS handshakes. The Health tab installs it, and removes it again.</p>
+    <p><a href="standalone-and-full.html">Standalone and Full →</a></p>
+  </div>
+  {{shot:hostnames|The DNS table: each name looked up, the addresses it resolved to, and the program that asked}}
+</section>
+
+<section class="feature flip">
+  <div class="feature-text">
+    <p class="eyebrow">Cyberspace</p>
+    <h2 id="cyberspace">The internet as a place you can learn</h2>
+    <p>Addresses run along a Hilbert curve, so every block of addresses is a block of floor and the same address is always in the same place. Cloud providers become districts you recognise. Each destination is a tower as tall as the bytes it has carried and as bright as its rate. Drag to orbit, and fly with W A S D.</p>
+    <p><a href="the-window.html#cyberspace">Flying through it →</a></p>
+  </div>
+  {{shot:cyberspace|Towers of light on the IPv4 floor, labelled by block, with beams arcing to them from this Mac's programs}}
+</section>
+
+<section class="feature">
+  <div class="feature-text">
+    <p class="eyebrow">History</p>
+    <h2 id="history">Drag back in time</h2>
+    <p>The timeline replays the last fifteen minutes in the graph, or up to an hour. Older traffic is in a SQLite log on your Mac that you search with the same filter, replay in the graph, and export as CSV or JSON lines.</p>
+    <p><a href="the-log.html">The log →</a></p>
+  </div>
+  {{shot:log|The Log panel: an hour of connections matching a search, with a slider that shows a past moment in the graph}}
+</section>
+
+<section class="feature flip">
+  <div class="feature-text">
+    <p class="eyebrow">Filtering</p>
+    <h2 id="filter">One filter for everything</h2>
+    <p>The same language narrows the graph, the tables, and the log. Values understand units, wildcards, and networks, and terms combine with AND, OR, NOT, and brackets.</p>
+    <p><a href="filtering.html">The filter language →</a></p>
+  </div>
+  <div class="code"><pre><code class="language-text">process:Slack rate_out&gt;100KB/s
+user:root service:SSH
+r_port:443 NOT host:*.apple.com
+age&gt;1h bytes&lt;10KB
+class:public country!=US signing=unsigned
+remote:10.0.0.0/8 OR tag:office</code></pre></div>
+</section>
+
+<section class="feature">
+  <div class="feature-text">
+    <p class="eyebrow">On a wall</p>
+    <h2 id="wall">Made to be watched</h2>
+    <p>Kiosk mode shows nothing but the graph and keeps the display awake. Six colour themes include one whose hues stay distinct with the common colour-vision deficiencies. A saved workspace starts a wall display in one command.</p>
+    <p><a href="workspaces.html">Workspaces and walls →</a></p>
+  </div>
+  {{shot:themes|The same traffic in four of the colour themes: Neon, Phosphor, Amber, and Ice}}
+</section>
+
+<section class="closing">
+  <h2 id="what-it-does-not-do">What it does not do</h2>
+  <ul class="watches">
+    <li><strong>It never blocks, changes, or injects anything.</strong> It watches, and that is all.</li>
+    <li><strong>It sends nothing anywhere.</strong> No telemetry, no update checks, no crash reports.</li>
+    <li><strong>It keeps no packet contents.</strong> Only who talked to whom, how much, and when.</li>
+    <li><strong>It goes online only when you ask:</strong> to download the free location databases, and for reverse DNS lookups if you turn them on.</li>
+  </ul>
+  <p><a href="privacy.html">Privacy →</a></p>
+</section>
+
+<section class="closing">
+  <h2 id="read-on">Read on</h2>
+  <div class="cards">
+    <a href="installing.html"><strong>Installing</strong><span>The one-line installer and its options, the zip, and building from source.</span></a>
+    <a href="standalone-and-full.html"><strong>Standalone and Full</strong><span>What it sees without a password, and what the collector adds.</span></a>
+    <a href="the-window.html"><strong>The window</strong><span>The graph, the timeline, the panels, and how to read them.</span></a>
+    <a href="filtering.html"><strong>Filtering</strong><span>Every field, and traffic that never leaves this Mac.</span></a>
+    <a href="troubleshooting.html"><strong>Troubleshooting</strong><span>When something looks wrong, and what to do about it.</span></a>
+    <a href="command-line.html"><strong>Command line</strong><span>sbctl: the same engine without the window.</span></a>
+  </div>
+</section>

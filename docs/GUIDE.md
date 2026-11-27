@@ -17,7 +17,7 @@ The installer:
 1. checks this is an Apple silicon Mac on macOS 15 or later;
 2. downloads the release's zip and checks it against the SHA-256 written into the installer, so it installs nothing that differs from what was released;
 3. puts Switchboard.app in /Applications, quitting and replacing a copy already there;
-4. asks whether to install the collector (Full mode, below), with `sudo`, which asks for your password; a collector already installed is updated without asking, so it matches the app;
+4. asks whether to install the collector ([Full mode](#standalone-and-full)), with `sudo`, which asks for your password; a collector already installed is updated without asking, so it matches the app;
 5. asks whether to download the location databases, unless you have them;
 6. opens Switchboard.
 
@@ -33,7 +33,7 @@ Run it again to update. To read it before running it, download it with `curl -fs
 | `--zip FILE` | Install from a zip already downloaded; it is still checked against the release |
 | `--uninstall` | Remove the collector and the app, and ask before removing your log, databases, and settings |
 
-The installer downloads with `curl`, which does not mark files as quarantined, so macOS opens the app without the warning below.
+The installer downloads with `curl`, which does not mark files as quarantined, so macOS opens the app without the warning described in [From the zip](#from-the-zip).
 
 ### From the zip
 
@@ -77,7 +77,7 @@ Switchboard runs in one of two modes, shown at the top left of the window.
 **Standalone** needs nothing installed and no password. It sees the connections of the account you are logged in as. What it cannot see:
 
 - Connections made by other accounts and by system daemons running as root (for example `mDNSResponder`, `syspolicyd`, software-update and security agents).
-- Hostnames. Without packet capture there are no DNS answers or TLS handshakes to read names from, so destinations show as addresses unless you turn on active lookups (below).
+- Hostnames. Without packet capture there are no DNS answers or TLS handshakes to read names from, so destinations show as addresses unless you turn on active lookups ([Troubleshooting](#troubleshooting) says how).
 - A small share of your own sockets, about 5 to 8%, which the system's statistics interface does not report to an unprivileged program.
 - New connections for their first few seconds. The system reports other programs' new connections to an ordinary program only when they close, so Switchboard asks afresh every 5 seconds: a new connection appears within that time and is live from then on, and one that lasts less than that appears only once it has ended.
 
@@ -202,7 +202,7 @@ Many connections never leave the machine: containers, development servers, datab
 - **On** (the default): everything, including traffic within this Mac.
 - **Off**: only traffic to and from other machines. The graph, the tables, and the log search all leave the rest out, and a line at the top left says so.
 
-This only changes what is shown. Whether these connections are written to the log at all is a separate setting, below.
+This only changes what is shown. Whether these connections are written to the log at all is a separate setting, in [The log](#the-log).
 
 ## The log
 
