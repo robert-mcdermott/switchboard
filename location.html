@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="canonical" href="https://robert-mcdermott.github.io/switchboard/location.html">
+<title>Location and network owner · Switchboard</title>
+<meta name="description" content="Country, city, and network owner come from the free DB-IP Lite databases, about 130 MB. Switchboard downloads them only when you ask: press Download…">
+<meta property="og:site_name" content="Switchboard">
+<meta property="og:title" content="Location and network owner · Switchboard">
+<meta property="og:description" content="Country, city, and network owner come from the free DB-IP Lite databases, about 130 MB. Switchboard downloads them only when you ask: press Download…">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://robert-mcdermott.github.io/switchboard/location.html">
+<meta property="og:image" content="https://robert-mcdermott.github.io/switchboard/images/console.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#f6f8fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#070b16" media="(prefers-color-scheme: dark)">
+<link rel="icon" type="image/png" href="assets/icon.png">
+<link rel="apple-touch-icon" href="assets/icon.png">
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/theme.js"></script>
+<script src="assets/site.js" defer></script>
+</head>
+<body class="page-location">
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <button class="menu-button" type="button" aria-label="Menu" aria-expanded="false" aria-controls="menu">☰</button>
+  <a class="brand" href="index.html"><img src="assets/icon.png" alt="" width="28" height="28"><span>Switchboard</span><span class="version">v0.1.1</span></a>
+  <div class="search" role="search">
+    <input id="search" type="search" placeholder="Search the guide" aria-label="Search the guide" autocomplete="off" spellcheck="false">
+    <kbd>/</kbd>
+    <div class="results" id="results" role="listbox" hidden></div>
+  </div>
+  <div class="theme" role="group" aria-label="Theme">
+    <button type="button" data-theme-choice="light" title="Light" aria-label="Light">☀</button><button type="button" data-theme-choice="system" title="Follow the system" aria-label="Follow the system">◐</button><button type="button" data-theme-choice="dark" title="Dark" aria-label="Dark">☾</button>
+  </div>
+  <a class="github" href="https://github.com/robert-mcdermott/switchboard" rel="noopener">GitHub</a>
+</header>
+<div class="layout">
+  <nav class="menu" id="menu" aria-label="Guide"><div class="menu-group"><div class="menu-title">Start</div><ul><li><a href="index.html">Overview</a></li><li><a href="installing.html">Installing</a></li></ul></div><div class="menu-group"><div class="menu-title">Use</div><ul><li><a href="standalone-and-full.html">Standalone and Full</a></li><li><a href="the-window.html">The window</a></li><li><a href="filtering.html">Filtering</a></li><li><a href="the-log.html">The log</a></li><li><a href="location.html" aria-current="page">Location data</a></li><li><a href="workspaces.html">Workspaces and walls</a></li><li><a href="keys.html">Keys</a></li></ul></div><div class="menu-group"><div class="menu-title">Help</div><ul><li><a href="troubleshooting.html">Troubleshooting</a></li><li><a href="privacy.html">Privacy</a></li></ul></div><div class="menu-group"><div class="menu-title">Reference</div><ul><li><a href="command-line.html">Command line</a></li><li><a href="how-it-works.html">How it works</a></li><li><a href="releases.html">Releases</a></li></ul></div></nav>
+  <main id="content" class="content">
+<h1 id="location-and-network-owner">Location and network owner</h1>
+<p>Country, city, and network owner come from the free DB-IP Lite databases, about 130 MB. Switchboard downloads them only when you ask: press <strong>Download Location Data</strong> in Settings ▸ Location, or answer yes when the installer asks. The app uses them as soon as they arrive. DB-IP publishes new ones a day or two into each month; press <strong>Download Again</strong> whenever you like. From a clone, <code>scripts/fetch-geoip.sh</code> does the same, and the app reads the files at its next start.</p>
+<p>Check one address with <code>sbctl geo 8.8.8.8</code>. The data is <em>IP Geolocation by DB-IP</em>, licensed CC BY 4.0.</p>
+<p>The globe also needs to know where this Mac is. It guesses from the time zone; to set it exactly, open Settings ▸ Globe and enter a latitude and longitude such as <code>47.61, -122.33</code>.</p>
+    <nav class="pager" aria-label="Pages"><a class="prev" href="the-log.html"><span>Previous</span>The log</a><a class="next" href="workspaces.html"><span>Next</span>Workspaces and walls</a></nav>
+    <footer class="foot">Describes Switchboard 0.1.1. Apache License 2.0. Screenshots show simulated traffic. Location data is IP Geolocation by DB-IP, CC BY 4.0.</footer>
+  </main>
+  
+</div>
+</body>
+</html>

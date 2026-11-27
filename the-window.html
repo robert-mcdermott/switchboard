@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="canonical" href="https://robert-mcdermott.github.io/switchboard/the-window.html">
+<title>The window · Switchboard</title>
+<meta name="description" content="The Switchboard window: the graph and its six layouts, the timeline, the panels, and the inspector, and how to read what they show.">
+<meta property="og:site_name" content="Switchboard">
+<meta property="og:title" content="The window · Switchboard">
+<meta property="og:description" content="The Switchboard window: the graph and its six layouts, the timeline, the panels, and the inspector, and how to read what they show.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://robert-mcdermott.github.io/switchboard/the-window.html">
+<meta property="og:image" content="https://robert-mcdermott.github.io/switchboard/images/console.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#f6f8fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#070b16" media="(prefers-color-scheme: dark)">
+<link rel="icon" type="image/png" href="assets/icon.png">
+<link rel="apple-touch-icon" href="assets/icon.png">
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/theme.js"></script>
+<script src="assets/site.js" defer></script>
+</head>
+<body class="page-the-window">
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <button class="menu-button" type="button" aria-label="Menu" aria-expanded="false" aria-controls="menu">☰</button>
+  <a class="brand" href="index.html"><img src="assets/icon.png" alt="" width="28" height="28"><span>Switchboard</span><span class="version">v0.1.1</span></a>
+  <div class="search" role="search">
+    <input id="search" type="search" placeholder="Search the guide" aria-label="Search the guide" autocomplete="off" spellcheck="false">
+    <kbd>/</kbd>
+    <div class="results" id="results" role="listbox" hidden></div>
+  </div>
+  <div class="theme" role="group" aria-label="Theme">
+    <button type="button" data-theme-choice="light" title="Light" aria-label="Light">☀</button><button type="button" data-theme-choice="system" title="Follow the system" aria-label="Follow the system">◐</button><button type="button" data-theme-choice="dark" title="Dark" aria-label="Dark">☾</button>
+  </div>
+  <a class="github" href="https://github.com/robert-mcdermott/switchboard" rel="noopener">GitHub</a>
+</header>
+<div class="layout">
+  <nav class="menu" id="menu" aria-label="Guide"><div class="menu-group"><div class="menu-title">Start</div><ul><li><a href="index.html">Overview</a></li><li><a href="installing.html">Installing</a></li></ul></div><div class="menu-group"><div class="menu-title">Use</div><ul><li><a href="standalone-and-full.html">Standalone and Full</a></li><li><a href="the-window.html" aria-current="page">The window</a></li><li><a href="filtering.html">Filtering</a></li><li><a href="the-log.html">The log</a></li><li><a href="location.html">Location data</a></li><li><a href="workspaces.html">Workspaces and walls</a></li><li><a href="keys.html">Keys</a></li></ul></div><div class="menu-group"><div class="menu-title">Help</div><ul><li><a href="troubleshooting.html">Troubleshooting</a></li><li><a href="privacy.html">Privacy</a></li></ul></div><div class="menu-group"><div class="menu-title">Reference</div><ul><li><a href="command-line.html">Command line</a></li><li><a href="how-it-works.html">How it works</a></li><li><a href="releases.html">Releases</a></li></ul></div></nav>
+  <main id="content" class="content">
+<h1 id="the-window">The window</h1>
+<div class="table-wrap"><table><thead><tr><th>Part</th><th>What it is</th></tr></thead><tbody><tr><td>Top bar</td><td>The filter, the layout, the profile, and buttons for traffic within this Mac, keeping ended connections, and showing the panels and inspector</td></tr><tr><td>Graph</td><td>The connections, in one of six layouts</td></tr><tr><td>Timeline</td><td>Drag left to go back through the last 15 minutes (Settings ▸ History, up to an hour); the graph and tables follow. <strong>Space</strong> holds the present moment</td></tr><tr><td>Panels</td><td>Tables: connections, top talkers, throughput, protocols, interfaces, DNS, ages, first seen, trust, listening sockets, the log, health</td></tr><tr><td>Inspector</td><td>Everything about what you clicked</td></tr></tbody></table></div>
+<h2 id="layouts">Layouts<a class="anchor" href="#layouts" aria-label="Link to this section">#</a></h2>
+<div class="table-wrap"><table><thead><tr><th>Key</th><th>Layout</th><th>Good for</th></tr></thead><tbody><tr><td><strong>1</strong></td><td>Constellation</td><td>The whole machine at a glance</td></tr><tr><td><strong>2</strong></td><td>Flow</td><td>Where the bytes go: process, then protocol, then whoever owns the far end</td></tr><tr><td><strong>3</strong></td><td>Lanes</td><td>What happened when: one row per process, a bar per connection</td></tr><tr><td><strong>4</strong></td><td>Globe</td><td>Where in the world your traffic goes</td></tr><tr><td><strong>5</strong></td><td>Hierarchy</td><td>Account, process, domain, address, as a tree</td></tr><tr><td><strong>6</strong></td><td>Cyberspace</td><td>The address space as a floor, in 3D, to fly through</td></tr></tbody></table></div>
+<p>Whatever you select stays selected when you switch.</p>
+<h2 id="cyberspace">Cyberspace<a class="anchor" href="#cyberspace" aria-label="Link to this section">#</a></h2>
+<p>The floor is the address space. IPv4 is the square on the left and IPv6's global addresses (2000::/3) the one on the right. Addresses run along a Hilbert curve, which keeps neighbouring addresses together, so each block of addresses is a block of floor. The grid divides each square into 16 × 16 blocks: an IPv4 /8 apiece, labelled where something stands in it (<code>52/8</code>), or an IPv6 /11 (<code>2600::/11</code>). Link-local and unique-local IPv6 addresses stand in the gap between the squares, under this Mac.</p>
+<ul><li><strong>A tower</strong> stands on each destination's address. Height is the bytes it has carried, brightness its current rate, colour the kind of traffic, and pulses climb it as fast as the traffic goes. A bright ring at the top means never seen before.</li><li><strong>This Mac</strong> floats over the gap, with a pillar of light to the floor, and its processes in a ring below it. <strong>Beams</strong> arc from each process to each tower it is talking to.</li><li>Where many towers crowd one block, each is drawn thinner and fainter, and very dense scenes get less bloom, so a busy block reads as a cluster rather than a white column.</li></ul>
+<div class="table-wrap"><table><thead><tr><th>Do</th><th>To</th></tr></thead><tbody><tr><td>Nothing</td><td>It orbits once every five minutes (not in Still)</td></tr><tr><td>Drag, or swipe with two fingers</td><td>Orbit; let go mid-swipe and it carries on and slows</td></tr><tr><td>Scroll, or pinch</td><td>Move in and out</td></tr><tr><td>W A S D, or the arrows</td><td>Fly across the floor</td></tr><tr><td>Double-click a tower</td><td>Fly to it, and focus on it</td></tr><tr><td>0</td><td>Back to the starting view; the orbit resumes</td></tr></tbody></table></div>
+<p>Hover, click, right-click, and the filter work as in every other layout.</p>
+<p>The globe faces this Mac and sways slowly either side of it. Drag it, or swipe with two fingers, to turn it to any part of the world; let go mid-swipe and it spins on and slows. It stays where you leave it until you press <strong>0</strong>, which turns it back home. ⌥-drag moves the view instead. Its coastlines are Natural Earth's 1:110m, which is in the public domain and built in.</p>
+<h2 id="reading-the-graph">Reading the graph<a class="anchor" href="#reading-the-graph" aria-label="Link to this section">#</a></h2>
+<ul><li><strong>Line thickness and pulses</strong>: how much traffic, and which way most of it is going.</li><li><strong>Colour</strong>: what the traffic is. Teal is TLS, violet QUIC, green DNS, amber remote access, orange cleartext.</li><li><strong>A red ring on a process</strong>: unsigned, or its signature does not check out.</li><li><strong>An amber ring</strong>: signed by nobody in particular (normal for things you built or installed with Homebrew), or listening where other machines can reach it. The tooltip says which.</li><li><strong>A bright ring on a destination</strong>: this Mac has never talked to it before, according to the log.</li></ul>
+<p>Scroll or pinch to zoom. Zooming in spreads things apart much faster than it enlarges them, the way markers on a map stay small: at ten times the zoom, distances are ten times larger but dots and lines only about twice the size, so a crowded patch opens up instead of just getting bigger. <strong>0</strong> zooms back out.</p>
+<p>Hover for details, click to pin them in the inspector, ⌘-click to add to the selection, double-click to focus on a neighbourhood, right-click to filter to it, expand a group, or reveal a program in Finder.</p>
+<h2 id="profiles">Profiles<a class="anchor" href="#profiles" aria-label="Link to this section">#</a></h2>
+<p><strong>Cinema</strong> draws at up to 120 frames a second with full glow; for walls and demonstrations. <strong>Operator</strong> draws at 60 with less glow and more labels, at about half the CPU; for leaving open all day. <strong>Still</strong> has no motion at all. <strong>P</strong> cycles between them.</p>
+<h2 id="themes">Themes<a class="anchor" href="#themes" aria-label="Link to this section">#</a></h2>
+<p><strong>T</strong> cycles through six colour themes, and Settings ▸ Display ▸ Theme picks one. The choice is kept, and travels with exported settings.</p>
+<div class="table-wrap"><table><thead><tr><th>Theme</th><th>Looks like</th></tr></thead><tbody><tr><td>Standard</td><td>Cyan, violet, and green on deep navy</td></tr><tr><td>Neon</td><td>Magenta and cyan on deep violet</td></tr><tr><td>Phosphor</td><td>A green phosphor terminal</td></tr><tr><td>Amber</td><td>An amber terminal</td></tr><tr><td>Ice</td><td>Pale blues and whites on blue-black; the quietest</td></tr><tr><td>Colour-safe</td><td>Hues that stay distinct with the common colour-vision deficiencies</td></tr></tbody></table></div>
+<p>Every theme keeps a colour of its own for each kind of traffic, a red ring for a program whose signature fails, and warm colours for remote access and cleartext. All are dark: the graph adds light to its background, as a radar screen does. The panels and controls stay as they are.</p>
+    <nav class="pager" aria-label="Pages"><a class="prev" href="standalone-and-full.html"><span>Previous</span>Standalone and Full</a><a class="next" href="filtering.html"><span>Next</span>Filtering</a></nav>
+    <footer class="foot">Describes Switchboard 0.1.1. Apache License 2.0. Screenshots show simulated traffic. Location data is IP Geolocation by DB-IP, CC BY 4.0.</footer>
+  </main>
+  <aside class="toc" aria-label="On this page"><div class="menu-title">On this page</div><ul><li class="l2"><a href="#layouts">Layouts</a></li><li class="l2"><a href="#cyberspace">Cyberspace</a></li><li class="l2"><a href="#reading-the-graph">Reading the graph</a></li><li class="l2"><a href="#profiles">Profiles</a></li><li class="l2"><a href="#themes">Themes</a></li></ul></aside>
+</div>
+</body>
+</html>

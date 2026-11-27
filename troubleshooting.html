@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="canonical" href="https://robert-mcdermott.github.io/switchboard/troubleshooting.html">
+<title>Troubleshooting · Switchboard</title>
+<meta name="description" content="What to do when Switchboard looks wrong: installer errors, no hostnames or countries, a blank graph, high CPU, and missing sources after a macOS update.">
+<meta property="og:site_name" content="Switchboard">
+<meta property="og:title" content="Troubleshooting · Switchboard">
+<meta property="og:description" content="What to do when Switchboard looks wrong: installer errors, no hostnames or countries, a blank graph, high CPU, and missing sources after a macOS update.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://robert-mcdermott.github.io/switchboard/troubleshooting.html">
+<meta property="og:image" content="https://robert-mcdermott.github.io/switchboard/images/console.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#f6f8fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#070b16" media="(prefers-color-scheme: dark)">
+<link rel="icon" type="image/png" href="assets/icon.png">
+<link rel="apple-touch-icon" href="assets/icon.png">
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/theme.js"></script>
+<script src="assets/site.js" defer></script>
+</head>
+<body class="page-troubleshooting">
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <button class="menu-button" type="button" aria-label="Menu" aria-expanded="false" aria-controls="menu">☰</button>
+  <a class="brand" href="index.html"><img src="assets/icon.png" alt="" width="28" height="28"><span>Switchboard</span><span class="version">v0.1.1</span></a>
+  <div class="search" role="search">
+    <input id="search" type="search" placeholder="Search the guide" aria-label="Search the guide" autocomplete="off" spellcheck="false">
+    <kbd>/</kbd>
+    <div class="results" id="results" role="listbox" hidden></div>
+  </div>
+  <div class="theme" role="group" aria-label="Theme">
+    <button type="button" data-theme-choice="light" title="Light" aria-label="Light">☀</button><button type="button" data-theme-choice="system" title="Follow the system" aria-label="Follow the system">◐</button><button type="button" data-theme-choice="dark" title="Dark" aria-label="Dark">☾</button>
+  </div>
+  <a class="github" href="https://github.com/robert-mcdermott/switchboard" rel="noopener">GitHub</a>
+</header>
+<div class="layout">
+  <nav class="menu" id="menu" aria-label="Guide"><div class="menu-group"><div class="menu-title">Start</div><ul><li><a href="index.html">Overview</a></li><li><a href="installing.html">Installing</a></li></ul></div><div class="menu-group"><div class="menu-title">Use</div><ul><li><a href="standalone-and-full.html">Standalone and Full</a></li><li><a href="the-window.html">The window</a></li><li><a href="filtering.html">Filtering</a></li><li><a href="the-log.html">The log</a></li><li><a href="location.html">Location data</a></li><li><a href="workspaces.html">Workspaces and walls</a></li><li><a href="keys.html">Keys</a></li></ul></div><div class="menu-group"><div class="menu-title">Help</div><ul><li><a href="troubleshooting.html" aria-current="page">Troubleshooting</a></li><li><a href="privacy.html">Privacy</a></li></ul></div><div class="menu-group"><div class="menu-title">Reference</div><ul><li><a href="command-line.html">Command line</a></li><li><a href="how-it-works.html">How it works</a></li><li><a href="releases.html">Releases</a></li></ul></div></nav>
+  <main id="content" class="content">
+<h1 id="troubleshooting">Troubleshooting</h1>
+<p><strong>The installer says the download does not match the release's checksum.</strong> The 0.1.0 installer said this whenever the check could not run, not only when the download was wrong. Two things stopped it running: an Intel-only <code>shasum</code> left in <code>/usr/local/bin</code> by an old Homebrew, which cannot run on a Mac without Rosetta, and Perl settings such as <code>PERL5LIB</code>, which can break macOS's own <code>shasum</code>. Run the install command again to get the current installer, which uses only macOS's own tools. If it still finds a difference, it shows what arrived instead. A few kilobytes of HTML means a proxy or web filter on your network replaced the download: try another network, or install <a href="installing.html#from-the-zip">from the zip</a>.</p>
+<p><strong>It says Standalone, but the collector is installed.</strong> Check it is running: <code>sudo launchctl print system/io.github.robert-mcdermott.switchboard.collector</code>. Its log is <code>/var/log/switchboardd.log</code>. Reinstalling from the Health tab, or with <code>sudo scripts/install.sh</code>, restarts it. Switchboard checks for the collector every few seconds and switches on its own.</p>
+<p><strong>No hostnames, only addresses.</strong> Hostnames come from the collector's packet capture, so Standalone has none. In Full mode, some names are never visible on the wire: encrypted DNS (DoH, DoT), Encrypted Client Hello, and iCloud Private Relay all hide them, and QUIC connections are named only through DNS. Settings ▸ Hostnames ▸ <em>looking up the rest</em> fills gaps with reverse lookups, which do send queries to your DNS resolver.</p>
+<p><strong>No countries or owners.</strong> Press <strong>Download Location Data</strong> in Settings ▸ Location. Settings and the Health tab say which databases are loaded. Private addresses never have a country.</p>
+<p><strong>The globe puts everything under &quot;no location&quot;.</strong> The same: no location database loaded, or these are addresses the database does not know.</p>
+<p><strong>The graph is blank.</strong> The Health tab names the Metal device and any error. Switchboard needs a Mac with Metal, which every Mac that runs macOS 15 has.</p>
+<p><strong>macOS asks whether to reopen windows.</strong> This happens after Switchboard was stopped while starting up. Choose either; it is harmless.</p>
+<p><strong>A download shows little received traffic, then a spike when it ends.</strong> Builds before 21 November 2026 did this: the system tells an ordinary program about other programs' new connections only when they close. Switchboard now asks afresh every few seconds, so a new connection appears within about 5 seconds (10 with the collector) and is live from then on. In Full mode, update the collector from the Health tab to get the fix there too. The Health tab's NetworkStatistics line shows how often it renews, and in Full mode how many of the connections the kernel lists it is reporting.</p>
+<p><strong>It uses more CPU than I would like.</strong> Switch to the Operator profile (<strong>P</strong>), which draws half as often. Hiding the panels (<strong>B</strong>) saves a little more.</p>
+<p><strong>After a macOS update something is missing.</strong> Switchboard reads some interfaces Apple does not document. The Health tab shows each source and whether it is working; a broken one costs detail, not the whole app. Please report it with the Health tab's contents.</p>
+    <nav class="pager" aria-label="Pages"><a class="prev" href="keys.html"><span>Previous</span>Keys</a><a class="next" href="privacy.html"><span>Next</span>Privacy</a></nav>
+    <footer class="foot">Describes Switchboard 0.1.1. Apache License 2.0. Screenshots show simulated traffic. Location data is IP Geolocation by DB-IP, CC BY 4.0.</footer>
+  </main>
+  
+</div>
+</body>
+</html>

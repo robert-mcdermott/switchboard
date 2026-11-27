@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="canonical" href="https://robert-mcdermott.github.io/switchboard/installing.html">
+<title>Installing · Switchboard</title>
+<meta name="description" content="Switchboard needs a Mac with Apple silicon (M1 or later) and macOS 15 or later. It has only been tested on macOS 27.">
+<meta property="og:site_name" content="Switchboard">
+<meta property="og:title" content="Installing · Switchboard">
+<meta property="og:description" content="Switchboard needs a Mac with Apple silicon (M1 or later) and macOS 15 or later. It has only been tested on macOS 27.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://robert-mcdermott.github.io/switchboard/installing.html">
+<meta property="og:image" content="https://robert-mcdermott.github.io/switchboard/images/console.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#f6f8fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#070b16" media="(prefers-color-scheme: dark)">
+<link rel="icon" type="image/png" href="assets/icon.png">
+<link rel="apple-touch-icon" href="assets/icon.png">
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/theme.js"></script>
+<script src="assets/site.js" defer></script>
+</head>
+<body class="page-installing">
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <button class="menu-button" type="button" aria-label="Menu" aria-expanded="false" aria-controls="menu">☰</button>
+  <a class="brand" href="index.html"><img src="assets/icon.png" alt="" width="28" height="28"><span>Switchboard</span><span class="version">v0.1.1</span></a>
+  <div class="search" role="search">
+    <input id="search" type="search" placeholder="Search the guide" aria-label="Search the guide" autocomplete="off" spellcheck="false">
+    <kbd>/</kbd>
+    <div class="results" id="results" role="listbox" hidden></div>
+  </div>
+  <div class="theme" role="group" aria-label="Theme">
+    <button type="button" data-theme-choice="light" title="Light" aria-label="Light">☀</button><button type="button" data-theme-choice="system" title="Follow the system" aria-label="Follow the system">◐</button><button type="button" data-theme-choice="dark" title="Dark" aria-label="Dark">☾</button>
+  </div>
+  <a class="github" href="https://github.com/robert-mcdermott/switchboard" rel="noopener">GitHub</a>
+</header>
+<div class="layout">
+  <nav class="menu" id="menu" aria-label="Guide"><div class="menu-group"><div class="menu-title">Start</div><ul><li><a href="index.html">Overview</a></li><li><a href="installing.html" aria-current="page">Installing</a></li></ul></div><div class="menu-group"><div class="menu-title">Use</div><ul><li><a href="standalone-and-full.html">Standalone and Full</a></li><li><a href="the-window.html">The window</a></li><li><a href="filtering.html">Filtering</a></li><li><a href="the-log.html">The log</a></li><li><a href="location.html">Location data</a></li><li><a href="workspaces.html">Workspaces and walls</a></li><li><a href="keys.html">Keys</a></li></ul></div><div class="menu-group"><div class="menu-title">Help</div><ul><li><a href="troubleshooting.html">Troubleshooting</a></li><li><a href="privacy.html">Privacy</a></li></ul></div><div class="menu-group"><div class="menu-title">Reference</div><ul><li><a href="command-line.html">Command line</a></li><li><a href="how-it-works.html">How it works</a></li><li><a href="releases.html">Releases</a></li></ul></div></nav>
+  <main id="content" class="content">
+<h1 id="installing">Installing</h1>
+<p>Switchboard needs a Mac with Apple silicon (M1 or later) and macOS 15 or later. It has only been tested on macOS 27.</p>
+<h2 id="with-the-installer-recommended">With the installer (recommended)<a class="anchor" href="#with-the-installer-recommended" aria-label="Link to this section">#</a></h2>
+<div class="code"><pre><code class="language-bash">curl -fsSL https://github.com/robert-mcdermott/switchboard/releases/latest/download/install.sh | bash</code></pre></div>
+<p>The installer:</p>
+<ol><li>checks this is an Apple silicon Mac on macOS 15 or later;</li><li>downloads the release's zip and checks it against the SHA-256 written into the installer, so it installs nothing that differs from what was released;</li><li>puts Switchboard.app in /Applications, quitting and replacing a copy already there;</li><li>asks whether to install the collector (<a href="standalone-and-full.html">Full mode</a>), with <code>sudo</code>, which asks for your password; a collector already installed is updated without asking, so it matches the app;</li><li>asks whether to download the location databases, unless you have them;</li><li>opens Switchboard.</li></ol>
+<p>Run it again to update. To read it before running it, download it with <code>curl -fsSL &lt;the address above&gt; -o install.sh</code>, read it, then <code>bash install.sh</code>. Options, after <code>bash -s --</code> when piping:</p>
+<div class="table-wrap"><table><thead><tr><th>Option</th><th>Does</th></tr></thead><tbody><tr><td><code>--collector</code>, <code>--no-collector</code></td><td>Install or update the collector, or leave it alone, without asking</td></tr><tr><td><code>--geoip</code>, <code>--no-geoip</code></td><td>Download the location databases, or not, without asking</td></tr><tr><td><code>--yes</code></td><td>Ask nothing: install the app, and update a collector already installed</td></tr><tr><td><code>--dir DIR</code></td><td>Put the app in DIR, such as <code>~/Applications</code>, instead of /Applications</td></tr><tr><td><code>--no-open</code></td><td>Do not open the app afterwards</td></tr><tr><td><code>--zip FILE</code></td><td>Install from a zip already downloaded; it is still checked against the release</td></tr><tr><td><code>--uninstall</code></td><td>Remove the collector and the app, and ask before removing your log, databases, and settings</td></tr></tbody></table></div>
+<p>The installer downloads with <code>curl</code>, which does not mark files as quarantined, so macOS opens the app without the warning described in <a href="installing.html#from-the-zip">From the zip</a>.</p>
+<h2 id="from-the-zip">From the zip<a class="anchor" href="#from-the-zip" aria-label="Link to this section">#</a></h2>
+<p>Download <code>Switchboard-&lt;version&gt;-arm64.zip</code> from the <a href="https://github.com/robert-mcdermott/switchboard/releases" rel="noopener">releases page</a>, open it, and drag Switchboard.app to Applications. Switchboard is signed ad hoc, not with a Developer ID, and is not notarised, so the first time you open it macOS says it cannot check it. Open System Settings ▸ Privacy &amp; Security, scroll to Security, and click <strong>Open Anyway</strong>; you are asked once. To check the zip first, compare <code>shasum -a 256 Switchboard-&lt;version&gt;-arm64.zip</code> with the release's <code>SHA256SUMS</code>.</p>
+<p>Everything else is in the app: the Health tab installs the collector and Settings ▸ Location downloads the location data.</p>
+<h2 id="from-source">From source<a class="anchor" href="#from-source" aria-label="Link to this section">#</a></h2>
+<p>You need Xcode or its command line tools, with Swift 6.</p>
+<div class="code"><pre><code class="language-bash">git clone https://github.com/robert-mcdermott/switchboard.git</code></pre></div>
+<div class="code"><pre><code class="language-bash">cd switchboard &amp;&amp; scripts/bundle.sh</code></pre></div>
+<div class="code"><pre><code class="language-bash">open build/Switchboard.app</code></pre></div>
+<p>Nothing is downloaded during the build; Switchboard has no third-party dependencies. <code>scripts/release.sh</code> tests and builds a release in <code>build/release</code>: the zip, <code>install.sh</code> with the zip's checksum filled in, and <code>SHA256SUMS</code>. With <code>--publish</code> it creates the GitHub release from them, from a clean <code>main</code> that has been pushed.</p>
+<h2 id="what-goes-where">What goes where<a class="anchor" href="#what-goes-where" aria-label="Link to this section">#</a></h2>
+<div class="table-wrap"><table><thead><tr><th>What</th><th>Where</th></tr></thead><tbody><tr><td>The app, with the collector, <code>sbctl</code>, and the scripts it runs inside it</td><td><code>/Applications/Switchboard.app</code></td></tr><tr><td>The collector, once installed</td><td><code>/usr/local/libexec/switchboardd</code>, started by <code>/Library/LaunchDaemons/io.github.robert-mcdermott.switchboard.collector.plist</code>, logging to <code>/var/log/switchboardd.log</code></td></tr><tr><td>The log and the location databases</td><td><code>~/Library/Application Support/Switchboard</code></td></tr><tr><td>Settings and workspaces</td><td>The app's preferences, <code>io.github.robert-mcdermott.switchboard.app</code></td></tr></tbody></table></div>
+<p>Builds before 0.1.0 used the identifier <code>local.switchboard</code>. The first launch of 0.1.0 carries their settings over, and installing the collector replaces the old one.</p>
+    <nav class="pager" aria-label="Pages"><a class="prev" href="index.html"><span>Previous</span>Overview</a><a class="next" href="standalone-and-full.html"><span>Next</span>Standalone and Full</a></nav>
+    <footer class="foot">Describes Switchboard 0.1.1. Apache License 2.0. Screenshots show simulated traffic. Location data is IP Geolocation by DB-IP, CC BY 4.0.</footer>
+  </main>
+  <aside class="toc" aria-label="On this page"><div class="menu-title">On this page</div><ul><li class="l2"><a href="#with-the-installer-recommended">With the installer (recommended)</a></li><li class="l2"><a href="#from-the-zip">From the zip</a></li><li class="l2"><a href="#from-source">From source</a></li><li class="l2"><a href="#what-goes-where">What goes where</a></li></ul></aside>
+</div>
+</body>
+</html>

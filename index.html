@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="canonical" href="https://robert-mcdermott.github.io/switchboard/">
+<title>Switchboard: see every network connection on your Mac</title>
+<meta name="description" content="A free, open-source network monitor for macOS: a live picture of every connection on your Mac, by program, with hostnames, places, and a searchable history.">
+<meta property="og:site_name" content="Switchboard">
+<meta property="og:title" content="Switchboard: see every network connection on your Mac">
+<meta property="og:description" content="A free, open-source network monitor for macOS: a live picture of every connection on your Mac, by program, with hostnames, places, and a searchable history.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://robert-mcdermott.github.io/switchboard/">
+<meta property="og:image" content="https://robert-mcdermott.github.io/switchboard/images/console.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#f6f8fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#070b16" media="(prefers-color-scheme: dark)">
+<link rel="icon" type="image/png" href="assets/icon.png">
+<link rel="apple-touch-icon" href="assets/icon.png">
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/theme.js"></script>
+<script src="assets/site.js" defer></script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Switchboard","url":"https://robert-mcdermott.github.io/switchboard/","description":"A free, open-source network monitor for macOS: a live picture of every connection on your Mac, by program, with hostnames, places, and a searchable history.","applicationCategory":"UtilitiesApplication","operatingSystem":"macOS 15 or later, on Apple silicon","softwareVersion":"0.1.1","license":"https://www.apache.org/licenses/LICENSE-2.0","image":"https://robert-mcdermott.github.io/switchboard/images/console.jpg","downloadUrl":"https://github.com/robert-mcdermott/switchboard/releases/latest","codeRepository":"https://github.com/robert-mcdermott/switchboard","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"author":{"@type":"Person","name":"Robert McDermott"}}</script>
+</head>
+<body class="page-index">
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <button class="menu-button" type="button" aria-label="Menu" aria-expanded="false" aria-controls="menu">☰</button>
+  <a class="brand" href="index.html"><img src="assets/icon.png" alt="" width="28" height="28"><span>Switchboard</span><span class="version">v0.1.1</span></a>
+  <div class="search" role="search">
+    <input id="search" type="search" placeholder="Search the guide" aria-label="Search the guide" autocomplete="off" spellcheck="false">
+    <kbd>/</kbd>
+    <div class="results" id="results" role="listbox" hidden></div>
+  </div>
+  <div class="theme" role="group" aria-label="Theme">
+    <button type="button" data-theme-choice="light" title="Light" aria-label="Light">☀</button><button type="button" data-theme-choice="system" title="Follow the system" aria-label="Follow the system">◐</button><button type="button" data-theme-choice="dark" title="Dark" aria-label="Dark">☾</button>
+  </div>
+  <a class="github" href="https://github.com/robert-mcdermott/switchboard" rel="noopener">GitHub</a>
+</header>
+<div class="layout">
+  <nav class="menu" id="menu" aria-label="Guide"><div class="menu-group"><div class="menu-title">Start</div><ul><li><a href="index.html" aria-current="page">Overview</a></li><li><a href="installing.html">Installing</a></li></ul></div><div class="menu-group"><div class="menu-title">Use</div><ul><li><a href="standalone-and-full.html">Standalone and Full</a></li><li><a href="the-window.html">The window</a></li><li><a href="filtering.html">Filtering</a></li><li><a href="the-log.html">The log</a></li><li><a href="location.html">Location data</a></li><li><a href="workspaces.html">Workspaces and walls</a></li><li><a href="keys.html">Keys</a></li></ul></div><div class="menu-group"><div class="menu-title">Help</div><ul><li><a href="troubleshooting.html">Troubleshooting</a></li><li><a href="privacy.html">Privacy</a></li></ul></div><div class="menu-group"><div class="menu-title">Reference</div><ul><li><a href="command-line.html">Command line</a></li><li><a href="how-it-works.html">How it works</a></li><li><a href="releases.html">Releases</a></li></ul></div></nav>
+  <main id="content" class="content">
+<section class="hero">
+  <p class="eyebrow">Network monitor for macOS · free and open source</p>
+  <h1 id="switchboard">See every connection your Mac makes.</h1>
+  <p class="lead">Switchboard draws a live picture of the network on your Mac: which program is talking, to whom, how much, and for how long. It has six ways to look at it, a filter language, a timeline you can drag back, and a log you can search. It watches and never blocks, and it sends nothing anywhere.</p>
+  <div class="install">
+    <div class="code"><pre><code class="language-bash">curl -fsSL https://github.com/robert-mcdermott/switchboard/releases/latest/download/install.sh | bash</code></pre></div>
+    <p>Paste it into Terminal. Version 0.1.1, a beta, for Macs with Apple silicon on macOS 15 or later. The installer checks the download against the release's checksum and asks before anything that needs your password.</p>
+  </div>
+  <div class="cta">
+    <a class="button primary" href="installing.html">Install</a>
+    <a class="button" href="the-window.html">Read the guide</a>
+    <a class="button quiet" href="https://github.com/robert-mcdermott/switchboard" rel="noopener">Source on GitHub</a>
+  </div>
+  <figure class="shot"><img src="images/console.jpg" alt="The Switchboard window: this Mac in the centre, the programs using the network around it, the places they talk to beyond, an inspector on the right, and tables of traffic underneath" width="1800" height="991" fetchpriority="high" decoding="async"></figure>
+</section>
+
+<section class="pillars">
+  <div><h3>Every connection, by program</h3><p>Process, account, remote address and port, bytes and rate each way, age, TCP state, and round-trip time, live.</p></div>
+  <div><h3>Names, places, owners</h3><p>Hostnames from the DNS answers and TLS handshakes it sees, and the country, city, and network owner of each destination.</p></div>
+  <div><h3>Who signed it</h3><p>Unsigned and tampered programs get a red ring. Destinations this Mac has never talked to before are marked and listed.</p></div>
+  <div><h3>Nothing leaves your Mac</h3><p>No telemetry, no update checks, no crash reports, and no packet contents kept. It goes online only when you ask.</p></div>
+</section>
+
+<section class="layouts">
+  <div class="section-head">
+    <p class="eyebrow">Six layouts</p>
+    <h2 id="layouts">Six ways to look at the same traffic</h2>
+    <p>Press <kbd>1</kbd> to <kbd>6</kbd> to switch. Whatever you have selected stays selected, so you can follow one program from one picture to the next. <a href="the-window.html#layouts">The layouts →</a></p>
+  </div>
+  <div class="gallery">
+    <figure><img src="images/console.jpg" alt="The constellation layout: this Mac in the centre, its programs around it, and their destinations beyond" width="1800" height="991" loading="lazy" decoding="async"><figcaption><kbd>1</kbd><strong>Constellation</strong> The whole machine at a glance.</figcaption></figure>
+    <figure><img src="images/flow.jpg" alt="The flow layout: programs on the left, kinds of traffic in the middle, and the owners of the destinations on the right" width="1800" height="1125" loading="lazy" decoding="async"><figcaption><kbd>2</kbd><strong>Flow</strong> Where the bytes go: program, then protocol, then whoever owns the far end.</figcaption></figure>
+    <figure><img src="images/lanes.jpg" alt="The lanes layout: one row for each program, with a bar for each connection over time" width="1800" height="1125" loading="lazy" decoding="async"><figcaption><kbd>3</kbd><strong>Lanes</strong> What happened when: a row per program, a bar per connection.</figcaption></figure>
+    <figure><img src="images/globe.jpg" alt="The globe layout: arcs from this Mac to destinations around the world" width="1800" height="1125" loading="lazy" decoding="async"><figcaption><kbd>4</kbd><strong>Globe</strong> Where in the world your traffic goes.</figcaption></figure>
+    <figure><img src="images/hierarchy.jpg" alt="The hierarchy layout: accounts, programs, domains, and addresses as a tree" width="1800" height="1125" loading="lazy" decoding="async"><figcaption><kbd>5</kbd><strong>Hierarchy</strong> Account, program, domain, and address, as a tree.</figcaption></figure>
+    <figure><img src="images/cyberspace.jpg" alt="The cyberspace layout: towers of light standing on a floor that maps the address space" width="1800" height="1125" loading="lazy" decoding="async"><figcaption><kbd>6</kbd><strong>Cyberspace</strong> The address space as a floor in 3D, to fly through.</figcaption></figure>
+  </div>
+</section>
+
+<section class="feature">
+  <div class="feature-text">
+    <p class="eyebrow">Full mode</p>
+    <h2 id="names">Names, not just numbers</h2>
+    <p>On its own, Switchboard needs no password and sees every connection your account makes. Add its small collector, which runs as root, and it sees every account's connections and reads hostnames from DNS answers and TLS handshakes. The Health tab installs it, and removes it again.</p>
+    <p><a href="standalone-and-full.html">Standalone and Full →</a></p>
+  </div>
+  <figure class="shot"><img src="images/hostnames.jpg" alt="The DNS table: each name looked up, the addresses it resolved to, and the program that asked" width="1800" height="991" loading="lazy" decoding="async"></figure>
+</section>
+
+<section class="feature flip">
+  <div class="feature-text">
+    <p class="eyebrow">Cyberspace</p>
+    <h2 id="cyberspace">The internet as a place you can learn</h2>
+    <p>Addresses run along a Hilbert curve, so every block of addresses is a block of floor and the same address is always in the same place. Cloud providers become districts you recognise. Each destination is a tower as tall as the bytes it has carried and as bright as its rate. Drag to orbit, and fly with W A S D.</p>
+    <p><a href="the-window.html#cyberspace">Flying through it →</a></p>
+  </div>
+  <figure class="shot"><img src="images/cyberspace.jpg" alt="Towers of light on the IPv4 floor, labelled by block, with beams arcing to them from this Mac's programs" width="1800" height="1125" loading="lazy" decoding="async"></figure>
+</section>
+
+<section class="feature">
+  <div class="feature-text">
+    <p class="eyebrow">History</p>
+    <h2 id="history">Drag back in time</h2>
+    <p>The timeline replays the last fifteen minutes in the graph, or up to an hour. Older traffic is in a SQLite log on your Mac that you search with the same filter, replay in the graph, and export as CSV or JSON lines.</p>
+    <p><a href="the-log.html">The log →</a></p>
+  </div>
+  <figure class="shot"><img src="images/log.jpg" alt="The Log panel: an hour of connections matching a search, with a slider that shows a past moment in the graph" width="1800" height="991" loading="lazy" decoding="async"></figure>
+</section>
+
+<section class="feature flip">
+  <div class="feature-text">
+    <p class="eyebrow">Filtering</p>
+    <h2 id="filter">One filter for everything</h2>
+    <p>The same language narrows the graph, the tables, and the log. Values understand units, wildcards, and networks, and terms combine with AND, OR, NOT, and brackets.</p>
+    <p><a href="filtering.html">The filter language →</a></p>
+  </div>
+  <div class="code"><pre><code class="language-text">process:Slack rate_out&gt;100KB/s
+user:root service:SSH
+r_port:443 NOT host:*.apple.com
+age&gt;1h bytes&lt;10KB
+class:public country!=US signing=unsigned
+remote:10.0.0.0/8 OR tag:office</code></pre></div>
+</section>
+
+<section class="feature">
+  <div class="feature-text">
+    <p class="eyebrow">On a wall</p>
+    <h2 id="wall">Made to be watched</h2>
+    <p>Kiosk mode shows nothing but the graph and keeps the display awake. Six colour themes include one whose hues stay distinct with the common colour-vision deficiencies. A saved workspace starts a wall display in one command.</p>
+    <p><a href="workspaces.html">Workspaces and walls →</a></p>
+  </div>
+  <figure class="shot"><img src="images/themes.jpg" alt="The same traffic in four of the colour themes: Neon, Phosphor, Amber, and Ice" width="1800" height="1120" loading="lazy" decoding="async"></figure>
+</section>
+
+<section class="closing">
+  <h2 id="what-it-does-not-do">What it does not do</h2>
+  <ul class="watches">
+    <li><strong>It never blocks, changes, or injects anything.</strong> It watches, and that is all.</li>
+    <li><strong>It sends nothing anywhere.</strong> No telemetry, no update checks, no crash reports.</li>
+    <li><strong>It keeps no packet contents.</strong> Only who talked to whom, how much, and when.</li>
+    <li><strong>It goes online only when you ask:</strong> to download the free location databases, and for reverse DNS lookups if you turn them on.</li>
+  </ul>
+  <p><a href="privacy.html">Privacy →</a></p>
+</section>
+
+<section class="closing">
+  <h2 id="read-on">Read on</h2>
+  <div class="cards">
+    <a href="installing.html"><strong>Installing</strong><span>The one-line installer and its options, the zip, and building from source.</span></a>
+    <a href="standalone-and-full.html"><strong>Standalone and Full</strong><span>What it sees without a password, and what the collector adds.</span></a>
+    <a href="the-window.html"><strong>The window</strong><span>The graph, the timeline, the panels, and how to read them.</span></a>
+    <a href="filtering.html"><strong>Filtering</strong><span>Every field, and traffic that never leaves this Mac.</span></a>
+    <a href="troubleshooting.html"><strong>Troubleshooting</strong><span>When something looks wrong, and what to do about it.</span></a>
+    <a href="command-line.html"><strong>Command line</strong><span>sbctl: the same engine without the window.</span></a>
+  </div>
+</section>
+
+    <nav class="pager" aria-label="Pages"><span></span><a class="next" href="installing.html"><span>Next</span>Installing</a></nav>
+    <footer class="foot">Describes Switchboard 0.1.1. Apache License 2.0. Screenshots show simulated traffic. Location data is IP Geolocation by DB-IP, CC BY 4.0.</footer>
+  </main>
+  <aside class="toc" aria-label="On this page"><div class="menu-title">On this page</div><ul><li class="l2"><a href="#layouts">Six ways to look at the same traffic</a></li><li class="l2"><a href="#names">Names, not just numbers</a></li><li class="l2"><a href="#cyberspace">The internet as a place you can learn</a></li><li class="l2"><a href="#history">Drag back in time</a></li><li class="l2"><a href="#filter">One filter for everything</a></li><li class="l2"><a href="#wall">Made to be watched</a></li><li class="l2"><a href="#what-it-does-not-do">What it does not do</a></li><li class="l2"><a href="#read-on">Read on</a></li></ul></aside>
+</div>
+</body>
+</html>

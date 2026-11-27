@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="canonical" href="https://robert-mcdermott.github.io/switchboard/standalone-and-full.html">
+<title>Standalone and Full · Switchboard</title>
+<meta name="description" content="What Switchboard sees with no password and nothing installed, and what its optional root collector adds: every account's connections and their hostnames.">
+<meta property="og:site_name" content="Switchboard">
+<meta property="og:title" content="Standalone and Full · Switchboard">
+<meta property="og:description" content="What Switchboard sees with no password and nothing installed, and what its optional root collector adds: every account's connections and their hostnames.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://robert-mcdermott.github.io/switchboard/standalone-and-full.html">
+<meta property="og:image" content="https://robert-mcdermott.github.io/switchboard/images/console.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#f6f8fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#070b16" media="(prefers-color-scheme: dark)">
+<link rel="icon" type="image/png" href="assets/icon.png">
+<link rel="apple-touch-icon" href="assets/icon.png">
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/theme.js"></script>
+<script src="assets/site.js" defer></script>
+</head>
+<body class="page-standalone-and-full">
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <button class="menu-button" type="button" aria-label="Menu" aria-expanded="false" aria-controls="menu">☰</button>
+  <a class="brand" href="index.html"><img src="assets/icon.png" alt="" width="28" height="28"><span>Switchboard</span><span class="version">v0.1.1</span></a>
+  <div class="search" role="search">
+    <input id="search" type="search" placeholder="Search the guide" aria-label="Search the guide" autocomplete="off" spellcheck="false">
+    <kbd>/</kbd>
+    <div class="results" id="results" role="listbox" hidden></div>
+  </div>
+  <div class="theme" role="group" aria-label="Theme">
+    <button type="button" data-theme-choice="light" title="Light" aria-label="Light">☀</button><button type="button" data-theme-choice="system" title="Follow the system" aria-label="Follow the system">◐</button><button type="button" data-theme-choice="dark" title="Dark" aria-label="Dark">☾</button>
+  </div>
+  <a class="github" href="https://github.com/robert-mcdermott/switchboard" rel="noopener">GitHub</a>
+</header>
+<div class="layout">
+  <nav class="menu" id="menu" aria-label="Guide"><div class="menu-group"><div class="menu-title">Start</div><ul><li><a href="index.html">Overview</a></li><li><a href="installing.html">Installing</a></li></ul></div><div class="menu-group"><div class="menu-title">Use</div><ul><li><a href="standalone-and-full.html" aria-current="page">Standalone and Full</a></li><li><a href="the-window.html">The window</a></li><li><a href="filtering.html">Filtering</a></li><li><a href="the-log.html">The log</a></li><li><a href="location.html">Location data</a></li><li><a href="workspaces.html">Workspaces and walls</a></li><li><a href="keys.html">Keys</a></li></ul></div><div class="menu-group"><div class="menu-title">Help</div><ul><li><a href="troubleshooting.html">Troubleshooting</a></li><li><a href="privacy.html">Privacy</a></li></ul></div><div class="menu-group"><div class="menu-title">Reference</div><ul><li><a href="command-line.html">Command line</a></li><li><a href="how-it-works.html">How it works</a></li><li><a href="releases.html">Releases</a></li></ul></div></nav>
+  <main id="content" class="content">
+<h1 id="standalone-and-full">Standalone and Full</h1>
+<p>Switchboard runs in one of two modes, shown at the top left of the window.</p>
+<p><strong>Standalone</strong> needs nothing installed and no password. It sees the connections of the account you are logged in as. What it cannot see:</p>
+<ul><li>Connections made by other accounts and by system daemons running as root (for example <code>mDNSResponder</code>, <code>syspolicyd</code>, software-update and security agents).</li><li>Hostnames. Without packet capture there are no DNS answers or TLS handshakes to read names from, so destinations show as addresses unless you turn on active lookups (<a href="troubleshooting.html">Troubleshooting</a> says how).</li><li>A small share of your own sockets, about 5 to 8%, which the system's statistics interface does not report to an unprivileged program.</li><li>New connections for their first few seconds. The system reports other programs' new connections to an ordinary program only when they close, so Switchboard asks afresh every 5 seconds: a new connection appears within that time and is live from then on, and one that lasts less than that appears only once it has ended.</li></ul>
+<p><strong>Full</strong> adds a small collector, <code>switchboardd</code>, that runs as root. With it Switchboard sees every account's connections, reads hostnames from DNS answers and TLS server names, and learns what protocol a connection really speaks. The app notices the collector and switches to Full on its own.</p>
+<p>To install it, press <strong>Install Collector…</strong> on the Health tab, or answer yes when the installer asks. macOS asks for an administrator's password; Switchboard never sees it. The same tab has <strong>Remove Collector…</strong>, and <strong>Update Collector…</strong> when the collector is a different version from the app. From a clone:</p>
+<div class="code"><pre><code class="language-bash">sudo scripts/install.sh</code></pre></div>
+<div class="code"><pre><code class="language-bash">sudo scripts/uninstall.sh</code></pre></div>
+<p>Installing copies the collector to <code>/usr/local/libexec/switchboardd</code>, owned by root, and registers it with launchd; from a clone it builds the collector first, as you, and the app installs the copy it carries. Removing reverses each step.</p>
+    <nav class="pager" aria-label="Pages"><a class="prev" href="installing.html"><span>Previous</span>Installing</a><a class="next" href="the-window.html"><span>Next</span>The window</a></nav>
+    <footer class="foot">Describes Switchboard 0.1.1. Apache License 2.0. Screenshots show simulated traffic. Location data is IP Geolocation by DB-IP, CC BY 4.0.</footer>
+  </main>
+  
+</div>
+</body>
+</html>

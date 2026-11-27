@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="canonical" href="https://robert-mcdermott.github.io/switchboard/releases.html">
+<title>Releases · Switchboard</title>
+<meta name="description" content="Every release of Switchboard, newest first. Each one's zip, installer, and checksums are on its GitHub page; Installing has the one command that installs…">
+<meta property="og:site_name" content="Switchboard">
+<meta property="og:title" content="Releases · Switchboard">
+<meta property="og:description" content="Every release of Switchboard, newest first. Each one's zip, installer, and checksums are on its GitHub page; Installing has the one command that installs…">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://robert-mcdermott.github.io/switchboard/releases.html">
+<meta property="og:image" content="https://robert-mcdermott.github.io/switchboard/images/console.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#f6f8fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#070b16" media="(prefers-color-scheme: dark)">
+<link rel="icon" type="image/png" href="assets/icon.png">
+<link rel="apple-touch-icon" href="assets/icon.png">
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/theme.js"></script>
+<script src="assets/site.js" defer></script>
+</head>
+<body class="page-releases">
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <button class="menu-button" type="button" aria-label="Menu" aria-expanded="false" aria-controls="menu">☰</button>
+  <a class="brand" href="index.html"><img src="assets/icon.png" alt="" width="28" height="28"><span>Switchboard</span><span class="version">v0.1.1</span></a>
+  <div class="search" role="search">
+    <input id="search" type="search" placeholder="Search the guide" aria-label="Search the guide" autocomplete="off" spellcheck="false">
+    <kbd>/</kbd>
+    <div class="results" id="results" role="listbox" hidden></div>
+  </div>
+  <div class="theme" role="group" aria-label="Theme">
+    <button type="button" data-theme-choice="light" title="Light" aria-label="Light">☀</button><button type="button" data-theme-choice="system" title="Follow the system" aria-label="Follow the system">◐</button><button type="button" data-theme-choice="dark" title="Dark" aria-label="Dark">☾</button>
+  </div>
+  <a class="github" href="https://github.com/robert-mcdermott/switchboard" rel="noopener">GitHub</a>
+</header>
+<div class="layout">
+  <nav class="menu" id="menu" aria-label="Guide"><div class="menu-group"><div class="menu-title">Start</div><ul><li><a href="index.html">Overview</a></li><li><a href="installing.html">Installing</a></li></ul></div><div class="menu-group"><div class="menu-title">Use</div><ul><li><a href="standalone-and-full.html">Standalone and Full</a></li><li><a href="the-window.html">The window</a></li><li><a href="filtering.html">Filtering</a></li><li><a href="the-log.html">The log</a></li><li><a href="location.html">Location data</a></li><li><a href="workspaces.html">Workspaces and walls</a></li><li><a href="keys.html">Keys</a></li></ul></div><div class="menu-group"><div class="menu-title">Help</div><ul><li><a href="troubleshooting.html">Troubleshooting</a></li><li><a href="privacy.html">Privacy</a></li></ul></div><div class="menu-group"><div class="menu-title">Reference</div><ul><li><a href="command-line.html">Command line</a></li><li><a href="how-it-works.html">How it works</a></li><li><a href="releases.html" aria-current="page">Releases</a></li></ul></div></nav>
+  <main id="content" class="content">
+<h1 id="releases">Releases</h1>
+<p>Every release of Switchboard, newest first. Each one's zip, installer, and checksums are on its GitHub page; <a href="installing.html">Installing</a> has the one command that installs the latest.</p>
+<h2 id="switchboard-011">Switchboard 0.1.1<a class="anchor" href="#switchboard-011" aria-label="Link to this section">#</a></h2>
+<p>24 November 2026 · <a href="https://github.com/robert-mcdermott/switchboard/releases/tag/v0.1.1" rel="noopener">The release on GitHub</a></p>
+<p>A fix to the installer. Apart from its version number and the scripts below, the app is the same as 0.1.0.</p>
+<h3 id="fixed">Fixed<a class="anchor" href="#fixed" aria-label="Link to this section">#</a></h3>
+<ul><li><strong>The installer refused some Macs with &quot;the download does not match the release's checksum&quot;, when the download was fine.</strong> It reported any failure of <code>shasum</code> as a mismatch. On a Mac with Intel-only programs left in <code>/usr/local/bin</code> by an old Homebrew, <code>shasum</code> cannot run at all without Rosetta, and Perl settings such as <code>PERL5LIB</code> can break macOS's own copy. The installer now uses only macOS's own tools. It says when the check could not run, and on a real mismatch shows what arrived instead.</li><li><strong>The scripts inside the app use only macOS's own tools too.</strong> These are the ones that install and remove the collector and download the location data, for anyone who runs them from a clone.</li></ul>
+<h3 id="known-limits">Known limits<a class="anchor" href="#known-limits" aria-label="Link to this section">#</a></h3>
+<p>The same as <a href="https://github.com/robert-mcdermott/switchboard/releases/tag/v0.1.0" rel="noopener">0.1.0</a>.</p>
+<h2 id="switchboard-010">Switchboard 0.1.0<a class="anchor" href="#switchboard-010" aria-label="Link to this section">#</a></h2>
+<p>21 November 2026 · <a href="https://github.com/robert-mcdermott/switchboard/releases/tag/v0.1.0" rel="noopener">The release on GitHub</a></p>
+<p>The first release of Switchboard: a live picture of every network connection on your Mac, which program is talking, to whom, how much, and for how long.</p>
+<p>This is a beta. It is used daily on the author's Mac, but has only been run on macOS 27.</p>
+<h3 id="what-it-does">What it does<a class="anchor" href="#what-it-does" aria-label="Link to this section">#</a></h3>
+<ul><li>Every connection, by program: process, user, remote address and port, bytes and rate each way, age, TCP state, round-trip time.</li><li>Hostnames from the DNS answers and TLS handshakes it sees, once the collector is installed.</li><li>Country, city, and network owner for each destination.</li><li>Who signed each program, and which destinations are new.</li><li>Six layouts (Constellation, Flow, Lanes, Globe, Hierarchy, Cyberspace) and six colour themes.</li><li>A filter language, a timeline you can drag back, and a searchable log you can export.</li><li><code>sbctl</code>, a terminal viewer, at <code>/Applications/Switchboard.app/Contents/MacOS/sbctl</code>.</li></ul>
+<p>It watches and never blocks or changes anything. It sends nothing anywhere. It uses the network itself only when you ask it to: to download the location data, or for reverse DNS lookups if you turn them on.</p>
+<h3 id="known-limits-1">Known limits<a class="anchor" href="#known-limits-1" aria-label="Link to this section">#</a></h3>
+<ul><li>Without the collector, macOS withholds about 5 to 8% of your own account's connections from Switchboard. It also reports other programs' new connections a few seconds late.</li><li>The app uses 12 to 17% of a core in the Operator profile, over its 10% budget.</li><li>It has run for hours at a stretch, not days. Memory with an hour of history is about 315 MB and still creeps up slowly.</li><li>QUIC connections get names from DNS only. Encrypted DNS, ECH, and Private Relay all reduce what can be named.</li></ul>
+    <nav class="pager" aria-label="Pages"><a class="prev" href="how-it-works.html"><span>Previous</span>How it works</a></nav>
+    <footer class="foot">Describes Switchboard 0.1.1. Apache License 2.0. Screenshots show simulated traffic. Location data is IP Geolocation by DB-IP, CC BY 4.0.</footer>
+  </main>
+  <aside class="toc" aria-label="On this page"><div class="menu-title">On this page</div><ul><li class="l2"><a href="#switchboard-011">Switchboard 0.1.1</a></li><li class="l3"><a href="#fixed">Fixed</a></li><li class="l3"><a href="#known-limits">Known limits</a></li><li class="l2"><a href="#switchboard-010">Switchboard 0.1.0</a></li><li class="l3"><a href="#what-it-does">What it does</a></li><li class="l3"><a href="#known-limits-1">Known limits</a></li></ul></aside>
+</div>
+</body>
+</html>
